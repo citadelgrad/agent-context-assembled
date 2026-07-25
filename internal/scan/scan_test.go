@@ -315,22 +315,9 @@ func TestScanNoMatchesAnywhere(t *testing.T) {
 
 // TestScanFirstMatchWinsOnlyOneAncestorContributes verifies OpenCode's
 // FirstMatchWins behavior never stacks two ancestor matches: when both an
-// outer and an inner directory (within scope) have a match, only one of them
-// contributes, never both.
-//
-// NOTE / POSSIBLE SOURCE BUG: docs/design.md ("nearest project file only")
-// and docs/research.md ("First-match-wins per level"; the AGENTS.md spec's
-// own "closest one takes precedence" language it cross-references) document
-// this as nearest-to-target-wins. But scanTool's actual loop in scan.go
-// walks scopedDirs() in root-to-target order and sets firstMatchFound=true
-// after processing the FIRST (i.e. outermost/farthest-from-target) directory
-// with a match, then breaks -- so it is actually farthest-within-scope-wins,
-// not nearest-to-target-wins. This test asserts the CODE'S ACTUAL behavior
-// (farthest/outermost match wins) rather than the documented behavior, and
-// is deliberately named/commented to flag the discrepancy rather than
-// silently encode it as correct. See final report for this being called out
-// as a real bug candidate worth fixing in scan.go (e.g. by iterating dirs in
-// reverse -- target-to-root -- for FirstMatchWins tools).
+// outer and an inner directory (within scope) have a match, only the nearer
+// one (closest to target) contributes, per docs/design.md's "nearest project
+// file only" / docs/research.md's "First-match-wins per level".
 func TestScanFirstMatchWinsOnlyOneAncestorContributes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	tree := buildTestTree(t)
@@ -352,16 +339,11 @@ func TestScanFirstMatchWinsOnlyOneAncestorContributes(t *testing.T) {
 	if localMatches != 1 {
 		t.Fatalf("opencode (FirstMatchWins) should contribute exactly 1 local ancestor file (never stacked), got %d: %+v", localMatches, r.Files)
 	}
-	// As implemented today, scopedDirs()+scanTool() walk root-to-target and
-	// stop at the FIRST (outermost) directory with a match -- so the
-	// repo-level (farther/outer) file wins here, not the pkg-level (nearer)
-	// one. This contradicts the documented "nearest ancestor wins" spec; see
-	// the doc comment above.
-	if !hasPath(r.Files, filepath.Join(tree.repo, "AGENTS.md")) {
-		t.Errorf("opencode's actual (root-to-target, first-found) behavior should pick the outer repo-level AGENTS.md; got files: %+v", r.Files)
+	if !hasPath(r.Files, filepath.Join(tree.pkg, "AGENTS.md")) {
+		t.Errorf("opencode should pick the nearer pkg-level AGENTS.md (nearest-to-target wins); got files: %+v", r.Files)
 	}
-	if hasPath(r.Files, filepath.Join(tree.pkg, "AGENTS.md")) {
-		t.Errorf("opencode should NOT also include the nearer pkg-level AGENTS.md once an outer match has been found (first-match-wins, not stacked); got files: %+v", r.Files)
+	if hasPath(r.Files, filepath.Join(tree.repo, "AGENTS.md")) {
+		t.Errorf("opencode should NOT include the farther repo-level AGENTS.md once a nearer match has been found (first-match-wins, not stacked); got files: %+v", r.Files)
 	}
 }
 

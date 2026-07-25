@@ -471,16 +471,14 @@ func TestGeminiCLIReportProjectHashDirWithoutChatsSubdirIsSkipped(t *testing.T) 
 	}
 }
 
-// geminiCLIReport receives absTarget but the implementation never actually
-// reads or compares against it anywhere in the function body -- session logs
-// under ~/.gemini/tmp/<project_hash>/chats are counted globally, not matched
-// to the target directory the way Codex CLI's cwd-matching works. This test
-// demonstrates that fact directly: two calls with different absTarget values
-// (including a garbage one) produce byte-identical reports given the same
-// home fixture, confirming absTarget is a vestigial/unused parameter in this
-// function -- likely an oversight (or intentionally reserved for future
-// per-project session matching that was never implemented), not a behavior
-// this test should silently normalize away.
+// geminiCLIReport receives absTarget but never reads it: unlike Codex CLI's
+// cwd-matching, Gemini CLI's ~/.gemini/tmp/<project_hash> naming isn't
+// documented, so there's no confirmed way to derive project_hash from a
+// target path and scope the count to it -- session logs are intentionally
+// counted globally across all project hashes instead (see the doc comment
+// on geminiCLIReport). This test pins that behavior down directly: two calls
+// with different absTarget values (including a garbage one) must produce
+// byte-identical reports given the same home fixture.
 func TestGeminiCLIReportAbsTargetParameterIsUnusedByImplementation(t *testing.T) {
 	home := t.TempDir()
 	chatsDir := filepath.Join(home, ".gemini", "tmp", "somehash123", "chats")

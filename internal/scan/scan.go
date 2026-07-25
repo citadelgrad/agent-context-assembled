@@ -148,6 +148,18 @@ func scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
 	dirs := scopedDirs(chain, t)
 	target := chain.Dirs[len(chain.Dirs)-1]
 
+	// scopedDirs returns root-to-target order. FirstMatchWins tools (e.g.
+	// OpenCode) document "nearest project file wins", so search target-to-root
+	// instead -- otherwise the farthest/outermost match would win instead of
+	// the nearest one.
+	if t.FirstMatchWins {
+		reversed := make([]string, len(dirs))
+		for i, d := range dirs {
+			reversed[len(dirs)-1-i] = d
+		}
+		dirs = reversed
+	}
+
 	firstMatchFound := false
 	for _, dir := range dirs {
 		if t.FirstMatchWins && firstMatchFound {

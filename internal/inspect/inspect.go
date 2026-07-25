@@ -428,6 +428,10 @@ func aiderReport(absTarget string) Report {
 
 // ---- Gemini CLI --------------------------------------------------------
 
+// absTarget is intentionally unused: Gemini CLI's ~/.gemini/tmp/<project_hash>
+// directory naming isn't documented, so there's no confirmed way to derive
+// project_hash from a target path and scope the count to it. This reports
+// counts aggregated across all project hashes on the machine instead.
 func geminiCLIReport(home, absTarget string) Report {
 	base := Report{
 		Tool: "Gemini CLI",
