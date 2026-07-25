@@ -233,6 +233,16 @@ conditional-merge tools need — deliberately not a general YAML parser), and li
 `encoding/json` parsing of JSONL transcripts/rollouts (`internal/inspect`). None of this needed an
 external glob, YAML, or JSONL library — **`--compile` and `--live` added zero new dependencies.**
 
+## Testing
+
+```
+go test ./...
+```
+
+Tests are hermetic (`$HOME` is redirected to a temp dir, so nothing reads this machine's real
+`~/.claude`, `~/.codex`, etc.) and use only the standard `testing` package — no test-framework
+dependency.
+
 ## Build
 
 ```

@@ -7,6 +7,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/citadelgrad/agent-instructions-viewer/internal/compile"
@@ -16,13 +17,16 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
+// run implements the CLI, writing all non-error output to w (os.Stdout in
+// main; a buffer in tests) so behavior can be verified hermetically without
+// capturing the real process stdout.
+func run(args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("agent-instructions-viewer", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "output structured JSON instead of text")
 	all := fs.Bool("all", false, "include every supported tool, even ones with no contributing files")
@@ -69,9 +73,9 @@ func run(args []string) error {
 	if *liveMode {
 		reports := inspect.Run(target)
 		if *jsonOut {
-			return render.InspectJSON(os.Stdout, reports)
+			return render.InspectJSON(w, reports)
 		}
-		render.InspectText(os.Stdout, reports, *full)
+		render.InspectText(w, reports, *full)
 		return nil
 	}
 
@@ -83,15 +87,15 @@ func run(args []string) error {
 	if *compileMode {
 		compiled := compile.Run(results)
 		if *jsonOut {
-			return render.CompileJSON(os.Stdout, compiled, renderOpts)
+			return render.CompileJSON(w, compiled, renderOpts)
 		}
-		render.CompileText(os.Stdout, compiled, chain, renderOpts)
+		render.CompileText(w, compiled, chain, renderOpts)
 		return nil
 	}
 
 	if *jsonOut {
-		return render.JSON(os.Stdout, results, renderOpts)
+		return render.JSON(w, results, renderOpts)
 	}
-	render.Text(os.Stdout, results, chain, renderOpts)
+	render.Text(w, results, chain, renderOpts)
 	return nil
 }
