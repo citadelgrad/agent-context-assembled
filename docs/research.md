@@ -519,3 +519,155 @@ were not further verifiable; no separate convention found or claimed beyond what
 | Aider | none auto-loaded (`CONVENTIONS.md` by convention only) | N/A for instructions; config file uses fixed 3-point lookup | No | "home directory" (unspecified path) | Last-loaded-wins among 3 fixed config locations |
 | Gemini CLI | `GEMINI.md` (configurable name incl. `AGENTS.md`) | Yes, to `.git`/home | Yes, capped at 200 dirs | `~/.gemini/GEMINI.md` | Additive concat with provenance headers, general->specific |
 
+---
+
+## Runtime introspection
+
+Everything above predicts what a tool *would* load, from on-disk files. This section asks a
+different question: can we see what a tool *actually* loaded into context, in a real past or
+current session — the ground truth, not a prediction? Researched 2026-07-25. Implemented,
+where feasible, as `--live` (see `internal/inspect`).
+
+Each tool below is classified by one of four mechanisms:
+- **content-confirmed** — a real on-disk artifact exists and reliably contains actual loaded
+  content (not just metadata about it).
+- **metadata-only** — an artifact exists but its format is undocumented/fragile enough that we
+  only report its existence (path, count, last-modified), not parsed content.
+- **documented-flag-not-run** — a real, docs-confirmed mechanism exists, but it's interactive/
+  manual (a slash command, a UI panel, an opt-in flag that must be enabled before the session
+  starts) — nothing to retroactively read from disk.
+- **none** — no discoverable mechanism, confirmed or otherwise.
+
+### Claude Code — metadata-only / documented-flag-not-run
+- Session transcripts live at `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`, where
+  `<encoded-cwd>` is the absolute project path with every `/` replaced by `-` (confirmed by
+  direct testing; not officially documented). These are real, readable JSONL files, but do
+  **not** contain the verbatim compiled system prompt as a discrete field.
+- The `/context` slash command (documented at
+  [code.claude.com/docs/en/costs](https://code.claude.com/docs/en/costs) and related context docs)
+  shows a token/category size breakdown of what's loaded (system prompt, tools, memory files,
+  messages) but explicitly does **not** show the verbatim text: docs state "System prompt...
+  You never see it."
+- `ANTHROPIC_LOG` does **not** exist as an env var for this purpose (checked against official
+  docs and `--help`; no such variable is documented or recognized).
+- The confirmed way to see the actual compiled system prompt is `OTEL_LOG_RAW_API_BODIES=1`
+  (or `=file:<dir>` for untruncated output to a file), which requires OpenTelemetry logging to
+  already be configured (`CLAUDE_CODE_ENABLE_TELEMETRY=1` plus an OTLP exporter) — a telemetry
+  feature, not a lightweight debug flag, and it must be enabled *before* the session runs.
+- No cached "last compiled prompt" file exists anywhere under `~/.claude/`. Debug logs default
+  to `~/.claude/debug/<session-id>.txt` (diagnostic, not a prompt dump).
+- Implemented: `--live` locates the most recent `.jsonl` transcript for the target directory's
+  encoded path and reports it as metadata-only, pointing at `OTEL_LOG_RAW_API_BODIES` as the
+  real mechanism.
+
+### Codex CLI — content-confirmed (strongest result of all 9 tools)
+- Session rollouts live at `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`,
+  organized by **date**, not by project — each file must be opened and its embedded `cwd` field
+  checked to scope it to a target directory.
+- Each rollout contains a `session_meta` record with `payload.base_instructions.text` (the fixed
+  persona/system prompt) and a `turn_context` record with `payload.user_instructions` (the fully
+  compiled AGENTS.md project-doc payload — confirmed by matching the documented
+  `--- project-doc ---` separator format). Both are real, verbatim, previously-sent content, not
+  metadata about it.
+- Implemented: `--live` walks `~/.codex/sessions/`, sorts candidate rollout files by mtime
+  descending, and scans for a `cwd` match against the target directory, extracting and printing
+  `base_instructions` + `user_instructions` verbatim on the first match. Falls back to
+  metadata-only if rollouts exist but none match the target cwd, or documented-flag-not-run if
+  no rollout files exist at all.
+
+### OpenCode — documented-flag-not-run / metadata-only
+- `opencode export [sessionID]` is a real CLI subcommand (source-verified in
+  `packages/opencode/src/cli/cmd/export.ts` of the canonical repo,
+  [github.com/anomalyco/opencode](https://github.com/anomalyco/opencode) — note: not
+  `sst/opencode`, which is the legacy/predecessor repo) that dumps a session's full JSON to
+  stdout. Each message's `info.system` field holds the actual system prompt as sent. A
+  `--sanitize` flag can redact secrets.
+- This is real, confirmed, verbatim content — but it requires running the command interactively
+  against a session ID; there's no separate cached file this CLI can read without invoking
+  `opencode` itself.
+- Session/credential data lives at `~/.local/share/opencode/`.
+- Implemented: `--live` checks for `~/.local/share/opencode/` and reports its presence
+  (metadata-only) while pointing at `opencode export <sessionID>` as the real mechanism.
+
+### Aider — content-confirmed (opt-in) / metadata-only (default-on)
+- `.aider.chat.history.md` is written by default: human-readable, but source-verified to **not**
+  include the system prompt.
+- `.aider.llm.history` is opt-in (`--llm-history-file` / `AIDER_LLM_HISTORY_FILE`): a raw,
+  unfiltered dump of every API message including `role == "system"` entries — source-verified
+  in `base_coder.py` / `aider/utils.py`'s `format_messages()`. This **does** contain the actual
+  system prompt, verbatim.
+- Implemented: `--live` checks `.aider.llm.history` first (content-confirmed, full content
+  read and shown), then falls back to `.aider.chat.history.md` (metadata-only, with an explicit
+  note that it lacks the system prompt), then documented-flag-not-run if neither exists.
+
+### Gemini CLI — documented-flag-not-run / metadata-only
+- `/memory show` is documented as showing "the current hierarchical memory that has been
+  loaded... the exact instructional context being provided to the model" — and, distinct from
+  `/memory refresh`, it reflects live in-memory cached state rather than re-reading disk. This
+  is a real, docs-confirmed, accurate view — but only of the memory-tool payload (the GEMINI.md
+  concatenation), not the full assembled system prompt, and it's an interactive command with no
+  on-disk equivalent.
+- Session logs live at `~/.gemini/tmp/<project_hash>/chats/`; optional (opt-in) checkpoints at
+  `~/.gemini/tmp/<project_hash>/checkpoints`. Whether either contains a full system-prompt field
+  is **not confirmed** by docs — an open gap.
+- Implemented: `--live` counts session log files across all `<project_hash>` subdirectories
+  under `~/.gemini/tmp` and reports the newest as metadata-only, alongside the `/memory show`
+  vs `/memory refresh` explanation.
+
+### GitHub Copilot — documented-flag-not-run
+- VS Code's Chat Debug View (`...` menu -> "Show Chat Debug View") is documented at
+  [code.visualstudio.com/docs/copilot/troubleshooting](https://code.visualstudio.com/docs/copilot/troubleshooting)
+  to show "the raw details of each LLM request and response, including the full system prompt,
+  user prompt, context, and tool invocation payloads." This is real and strong — but it's an
+  interactive VS Code UI panel, not a file on disk.
+- The Output panel's trace logs are diagnostic-only (per docs.github.com), not a prompt dump.
+- Implemented: `--live` always reports this mechanism by name with a pointer to the menu path;
+  there's no artifact to search for.
+
+### Cursor — none (confirmed absence, not just undocumented)
+- No official mechanism found anywhere in Cursor's docs.
+- `state.vscdb`, a SQLite file under VS Code-style `globalStorage`
+  (`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` on macOS,
+  `~/.config/Cursor/User/globalStorage/state.vscdb` on Linux), is community-confirmed to hold
+  chat text, but Cursor staff have explicitly declined to document its schema. Whether it
+  contains the compiled system prompt is **unconfirmed** — genuinely unknown, not merely
+  undocumented.
+- Implemented: `--live` checks whether `state.vscdb` exists and reports metadata-only (existence
+  only, no parsing attempted, since the schema is admitted-undocumented) — or `none` if the file
+  isn't present at all.
+
+### Windsurf / Cascade — documented-flag-not-run / metadata-only
+- `post_cascade_response_with_transcript` is a real, opt-in (off by default) hook, documented at
+  [docs.devin.ai/desktop/cascade/hooks.md](https://docs.devin.ai/desktop/cascade/hooks.md), that
+  writes to `~/.windsurf/transcripts/{trajectory_id}.jsonl`, including tool args, file contents,
+  and "rules that were applied." Whether it includes the raw system-prompt text itself is not
+  explicitly confirmed by the docs.
+- Implemented: `--live` checks for `~/.windsurf/transcripts/*.jsonl` and reports count/newest
+  mtime as metadata-only if present, else documented-flag-not-run (describing the opt-in hook,
+  which must be enabled before a session to produce anything).
+
+### Cline — documented-flag-not-run / metadata-only (confirmed exclusion)
+- Task history is stored at `<globalStorageFsPath>/tasks/<taskId>/api_conversation_history.json`
+  (path is community-sourced; extension ID is `saoudrizwan.claude-dev`). An **official** doc
+  (docs.cline.bot, Enterprise Solutions -> Prompt Storage) explicitly confirms this file
+  **excludes** the system prompt — cross-verified in source, where `systemPrompt` is passed as a
+  separate argument from the `messages` array that gets persisted.
+- Implemented: `--live` checks for task folders under
+  `<home>/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks` (or
+  the Linux VS Code path) and reports metadata-only if found (explicitly noting the confirmed
+  absence of the system prompt), else documented-flag-not-run.
+
+### Summary table
+
+| Tool | Mechanism | Real artifact? | Contains verbatim system prompt? |
+|---|---|---|---|
+| Claude Code | metadata-only (transcript) / documented-flag-not-run (`OTEL_LOG_RAW_API_BODIES`) | Yes (transcript) | No (transcript); Yes (OTEL, not retroactively readable) |
+| Codex CLI | **content-confirmed** | Yes (rollout JSONL) | **Yes** |
+| OpenCode | documented-flag-not-run / metadata-only | Yes (data dir) | Yes, via `export` (not retroactively readable) |
+| Aider | **content-confirmed** if opt-in flag was used; metadata-only otherwise | Conditional | Yes, only if `--llm-history-file` was enabled |
+| Gemini CLI | documented-flag-not-run / metadata-only | Yes (session logs) | Unconfirmed in logs; `/memory show` shows memory payload only |
+| GitHub Copilot | documented-flag-not-run | No (UI panel only) | Yes, in the interactive Debug View only |
+| Cursor | metadata-only / none | Maybe (`state.vscdb`) | Unconfirmed — schema undocumented |
+| Windsurf | documented-flag-not-run / metadata-only | Conditional (opt-in hook) | Unconfirmed |
+| Cline | documented-flag-not-run / metadata-only | Yes (task history) | **No** — officially confirmed excluded |
+

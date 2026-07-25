@@ -82,6 +82,71 @@ Group output by tool. Within a tool, list each contributing file in the order ab
 path and content (or a preview, truncated with a note, unless `--full` — see README). Tools with
 zero contributing files are omitted unless `--all` is passed.
 
+## Step 6 — `--compile`: assemble the effective compiled context
+
+`--compile` takes the same Step 1-4 output (`scan.ToolResult`) and, per tool, actually concatenates
+the matched files into one assembled string — the "effective compiled context" — instead of just
+listing them. This lives in `internal/compile`. Per tool:
+
+- **Merge model.** Each tool gets a short label describing how it really merges multiple matched
+  files, not a generic assumption:
+  - *Additive concatenation* (Claude Code, Codex CLI, Cline, Gemini CLI): every matched file's
+    content is appended in precedence order.
+  - *Conditional / path-scoped*: GitHub Copilot (`.github/instructions/*.instructions.md` carries
+    an `applyTo` frontmatter glob — only applies to matching files, noted as a condition, not
+    unconditionally concatenated), Cursor (`.cursor/rules/*.mdc` frontmatter rule-type field
+    controls whether a rule is `always`, `auto-attached`, or `agent-requested`), Windsurf
+    (`trigger`/`globs` frontmatter on `.windsurf/rules/*.md` gates inclusion).
+  - *First-match-wins*: OpenCode — only the nearest matching project file is included; ancestors
+    that would otherwise match are explicitly marked skipped, not silently dropped.
+  - *N/A, no auto-load*: Aider — nothing is assembled since Aider doesn't auto-load an instruction
+    file; `--compile` reports this tool as empty with an explanatory note rather than fabricating
+    a chunk.
+- **Chunk separators.** Every contributing file becomes a `Chunk` with `Path`, `Reason` (why it's
+  included, e.g. "ancestor directory, root-to-target order"), and `Condition` (for conditional
+  tools, the actual frontmatter-derived gate, e.g. `applyTo: **/*.go`) — rendered as a banner
+  (`[i/n] SOURCE: ... WHY: ...`) immediately before that chunk's content in the assembled text, so
+  it's traceable which file produced which part of the output.
+- **Frontmatter extraction.** Because only Copilot/Cursor/Windsurf need a specific frontmatter
+  field (`applyTo`, rule-type, `trigger`/`globs`), `internal/compile` hand-rolls a minimal
+  line-scanning `key: value` reader over a leading `---`-delimited block — deliberately **not** a
+  general YAML parser (no multi-line values, no nested structures), to avoid adding a YAML
+  dependency for a need this narrow.
+- **Token estimate.** `len(content)/4` per chunk and per tool total, always labeled "estimate" in
+  output — never presented as an exact count, since no tool's real tokenizer is used.
+- **Documented size-limit checks.** Only checked where research.md cites a sourced numeric limit:
+  Codex CLI's `project_doc_max_bytes` (default 32 KiB, source-code-documented, scoped to the
+  AGENTS.md project-doc chain only) and Windsurf's `global_rules.md` 6,000-char cap plus per-file
+  `.windsurf/rules/*.md` / `.devin/rules/*.md` 12,000-char cap (3-of-4-source agreement). Every
+  other tool skips this check entirely rather than inventing a number.
+
+## Step 7 — `--live`: runtime introspection
+
+`--live` is fundamentally different from the default and `--compile` modes: instead of predicting
+what a tool would load from on-disk instruction files, it looks for artifacts proving what a tool
+actually loaded in a real session. This lives in `internal/inspect`, documented per-tool with
+sources in [research.md](./research.md#runtime-introspection). It does not call `scan.Run` at all
+(no ancestor-chain walk, no tool-file matching) — it goes straight to each tool's own
+session/log/debug artifact location, scoping to the target directory only where that tool's
+artifact format makes scoping possible (Claude Code's encoded-cwd project directory, Codex CLI's
+embedded `cwd` field per rollout, Aider's per-directory history file, Gemini CLI's project-hash
+log directory).
+
+Every one of the 9 tools always produces a `Report`, classified into exactly one of four
+mechanisms — **no tool is ever silently omitted**, even when nothing was found:
+
+| Mechanism | Meaning |
+|---|---|
+| `content-confirmed` | A real on-disk artifact was found and actually parsed/extracted (e.g. Codex CLI rollout `base_instructions`/`user_instructions`, Aider's opt-in `.aider.llm.history`) |
+| `metadata-only` | An artifact exists but its format is undocumented or too fragile to parse reliably — report path/count/last-modified only, no content guessing (e.g. Claude Code transcripts, Cursor's `state.vscdb`) |
+| `documented-flag-not-run` | A real, docs-confirmed mechanism exists but is interactive or must be enabled before the session runs (Claude Code's `/context` and `OTEL_LOG_RAW_API_BODIES`, OpenCode's `export` subcommand, GitHub Copilot's Chat Debug View, Windsurf's opt-in transcript hook) |
+| `none` | Nothing discoverable at all |
+
+Each `Report` carries a `Summary`, `Detail`, `Confidence`, and optionally `ArtifactPath` /
+`ArtifactCount` / `LastModified` / `ExtractedContent`. This mirrors the compile-mode principle of
+never inventing facts: where content can be honestly extracted, it is; where it can't, the CLI
+says so explicitly instead of guessing at a schema.
+
 ## Flow diagram
 
 ```mermaid
@@ -89,6 +154,7 @@ flowchart TB
     subgraph INPUT["Input"]
         TARGET["Target dir"]
         HOME["Home dir"]
+        MODE["Mode flag"]
     end
 
     subgraph WALK["Directory walk"]
@@ -107,11 +173,24 @@ flowchart TB
         GROUP["Group by tool"]
     end
 
+    subgraph ASSEMBLE["--compile only"]
+        MERGE["Apply merge model<br/>per tool"]
+        CHUNKS["Build chunks +<br/>separators"]
+        TOKENS["Estimate tokens,<br/>check limits"]
+    end
+
+    subgraph LIVE["--live only (bypasses walk)"]
+        ARTIFACT["Locate session<br/>artifact per tool"]
+        CLASSIFY["Classify mechanism:<br/>confirmed/metadata/none"]
+    end
+
     subgraph OUTPUT["Output"]
         TEXT["Terminal view"]
         JSON["--json"]
     end
 
+    MODE -.default/--compile.-> TARGET
+    MODE -.--live.-> ARTIFACT
     TARGET --> CHAIN
     CHAIN --> GITDET
     GITDET --> LOCAL
@@ -121,18 +200,30 @@ flowchart TB
     LOCAL --> SORT
     GLOBAL --> SORT
     SORT --> GROUP
-    GROUP --> TEXT
-    GROUP --> JSON
+    GROUP -->|default| TEXT
+    GROUP -->|default| JSON
+    GROUP -->|--compile| MERGE
+    MERGE --> CHUNKS
+    CHUNKS --> TOKENS
+    TOKENS --> TEXT
+    TOKENS --> JSON
+    HOME --> ARTIFACT
+    TARGET --> ARTIFACT
+    ARTIFACT --> CLASSIFY
+    CLASSIFY --> TEXT
+    CLASSIFY --> JSON
 
     classDef input fill:#e1f5ff,stroke:#0288d1,color:#000
     classDef process fill:#fff3e0,stroke:#f57c00,color:#000
     classDef output fill:#e8f5e9,stroke:#388e3c,color:#000
     classDef spec fill:#f3e5f5,stroke:#8e24aa,color:#000
+    classDef live fill:#fce4ec,stroke:#c2185b,color:#000
 
-    class TARGET,HOME input
-    class CHAIN,GITDET,LOCAL,GLOBAL,SORT,GROUP process
+    class TARGET,HOME,MODE input
+    class CHAIN,GITDET,LOCAL,GLOBAL,SORT,GROUP,MERGE,CHUNKS,TOKENS process
     class SPEC spec
     class TEXT,JSON output
+    class ARTIFACT,CLASSIFY live
 ```
 
 ### Legend
@@ -141,6 +232,7 @@ flowchart TB
 |---|---|
 | Target dir | The directory passed on the CLI, or cwd by default |
 | Home dir | `os.UserHomeDir()`, used for global config paths and as a reference point (not a hard boundary) |
+| Mode flag | Which of default / `--compile` / `--live` was passed; picks the branch below |
 | Build ancestor chain | `filepath.Dir()` repeated from target to filesystem root |
 | Detect `.git` boundary | Records which ancestor (if any) contains `.git`, since some tools stop their real walk there |
 | Tool spec | Static per-tool table encoding filenames, scope rule, and precedence order (from research.md) |
@@ -148,17 +240,23 @@ flowchart TB
 | Check tool's global config path | One-time lookup per tool, independent of target directory |
 | Order files by tool's precedence rule | Encodes least-specific-first ordering so later entries are understood to win/apply last |
 | Group by tool | Final grouping for both text and JSON renderers |
+| Apply merge model per tool | `--compile` only: additive / conditional / first-match-wins per research.md |
+| Build chunks + separators | `--compile` only: per-file `Chunk` with path/reason/condition banner |
+| Estimate tokens, check limits | `--compile` only: `len/4` estimate; documented-limit check only for Codex CLI / Windsurf |
+| Locate session artifact per tool | `--live` only: goes straight to each tool's session/log/debug location, skips the ancestor walk entirely |
+| Classify mechanism | `--live` only: content-confirmed / metadata-only / documented-flag-not-run / none, per tool, always emitted |
 
-## Sequence diagram (runtime behavior for a single run)
+## Sequence diagram (default and `--compile`)
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant CLI as CLI
     participant FS as Filesystem
+    participant C as compile pkg
     participant R as Renderer
 
-    U->>CLI: agent-instructions-viewer [path] [--json] [--all]
+    U->>CLI: agent-instructions-viewer [path] [--json] [--all] [--compile] [--full]
     CLI->>FS: resolve target dir (default cwd)
     CLI->>FS: walk ancestors to filesystem root
     FS-->>CLI: ancestor chain + .git boundary
@@ -170,9 +268,55 @@ sequenceDiagram
         FS-->>CLI: file contents
     end
     CLI->>CLI: order files per tool precedence
-    CLI->>R: render(compiled view)
+    alt --compile
+        CLI->>C: Run(results)
+        C->>C: apply merge model, build chunks,<br/>estimate tokens, check documented limits
+        C-->>CLI: []ToolCompile
+        CLI->>R: CompileText/CompileJSON(compiled)
+    else default
+        CLI->>R: Text/JSON(results)
+    end
     alt --json
         R-->>U: JSON array per tool
     else default
         R-->>U: grouped, readable text view
     end
+```
+
+## Sequence diagram (`--live`)
+
+`--live` bypasses the ancestor walk entirely — it never calls `scan.Run`. Each tool's report is
+independent and always emitted, even when nothing is found.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant CLI as CLI
+    participant I as inspect pkg
+    participant FS as Filesystem
+
+    U->>CLI: agent-instructions-viewer --live [path] [--json] [--full]
+    CLI->>I: Run(targetDir)
+    loop for each of the 9 known tools
+        I->>FS: look for tool's session/log/debug artifact
+        alt artifact found and parseable
+            FS-->>I: artifact content
+            I->>I: extract (e.g. Codex CLI base_instructions/<br/>user_instructions, Aider llm history)
+            I->>I: mark content-confirmed
+        else artifact found, format too fragile
+            FS-->>I: path, count, mtime only
+            I->>I: mark metadata-only
+        else known manual/opt-in mechanism, nothing to read
+            I->>I: mark documented-flag-not-run
+        else nothing discoverable
+            I->>I: mark none
+        end
+    end
+    I-->>CLI: []Report (always 9, never omitted)
+    CLI->>CLI: InspectText/InspectJSON(reports)
+    alt --json
+        CLI-->>U: JSON array, one object per tool
+    else default
+        CLI-->>U: per-tool mechanism + summary + detail + confidence
+    end
+```
