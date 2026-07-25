@@ -1,0 +1,25 @@
+internal/scan/scan.go
+  s_176849a1d8430f::t_9211a6a673c9e0 151-162
+internal/inspect/inspect.go
+  s_176849a1d8430f::t_50e707e36ae8b6 431-434
+internal/scan/scan_test.go
+  s_176849a1d8430f::t_4ae08b56d05320 318-320,342-343,345-346
+internal/inspect/inspect_test.go
+  s_176849a1d8430f::t_fc23ea71d9ba3e 474-481
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "2fbc536a60e2607b83e11feb84529ae69aac154f",
+  "prompts": {},
+  "sessions": {
+    "s_176849a1d8430f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af9d7696-02b0-4625-90ab-dd8f2ea04d2b",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
