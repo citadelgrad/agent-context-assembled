@@ -1,0 +1,30 @@
+docs/research.md
+  s_176849a1d8430f::t_d6e9b3b7dbb4dc 522-673
+docs/design.md
+  s_176849a1d8430f::t_03d54bd76ad5a8 249,256,259,271-278,284-322
+  s_176849a1d8430f::t_cf8701700f1554 85-149
+  s_176849a1d8430f::t_7052892b0eb5bf 157,176-186,192-193,203-214,220,222-223,226,235,243-247
+README.md
+  s_176849a1d8430f::t_037a4ccea231e8 244,247-253
+  s_176849a1d8430f::t_d81dee4879a345 64-71,93-109
+  s_176849a1d8430f::t_4c635c42a78982 132-203
+  s_176849a1d8430f::t_ff971f905e1f9e 227-234
+  s_176849a1d8430f::t_e2ee830eecff3b 110
+  s_176849a1d8430f::t_23fe8d6b96ac02 204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "ea0e6fc8caa99f9f8ddee4b86cb8ffd192c67e9a",
+  "prompts": {},
+  "sessions": {
+    "s_176849a1d8430f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af9d7696-02b0-4625-90ab-dd8f2ea04d2b",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
