@@ -1,0 +1,19 @@
+cmd/agent-instructions-viewer/integration_test.go
+  s_176849a1d8430f::t_ffcca66c929924 1-195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "11dada88cd5e7fe42a8b7d2184639348fb341798",
+  "prompts": {},
+  "sessions": {
+    "s_176849a1d8430f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af9d7696-02b0-4625-90ab-dd8f2ea04d2b",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
