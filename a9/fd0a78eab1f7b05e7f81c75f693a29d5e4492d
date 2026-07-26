@@ -1,0 +1,28 @@
+README.md
+  s_176849a1d8430f::t_8e257ec5c92fda 69-91
+cmd/actx/main_test.go
+  s_176849a1d8430f::t_cea75e96669cb9 6,13-45
+  s_176849a1d8430f::t_b2fd106d765ea3 314-359,377-387
+  s_176849a1d8430f::t_98637cc6e5df5c 360-376
+  s_176849a1d8430f::t_ee8753d47f8720 46
+cmd/actx/integration_test.go
+  s_176849a1d8430f::t_323acb90469042 183,194-268
+cmd/actx/main.go
+  s_176849a1d8430f::t_8d681eaf614af7 8-9,14-15,21,25-38,41-78,87,91-93,107-113,119-153,172,184,201-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "a9fd0a78eab1f7b05e7f81c75f693a29d5e4492d",
+  "prompts": {},
+  "sessions": {
+    "s_176849a1d8430f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af9d7696-02b0-4625-90ab-dd8f2ea04d2b",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
