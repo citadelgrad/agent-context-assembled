@@ -19,6 +19,12 @@ func TestWantsJSON(t *testing.T) {
 		{[]string{"-json"}, true},
 		{[]string{"--compile", "."}, false},
 		{nil, false},
+		{[]string{"--json=true", "."}, true},
+		{[]string{"-json=true"}, true},
+		{[]string{"--json=false", "."}, false},
+		{[]string{"--json=1", "."}, true},
+		{[]string{"--json=0", "."}, false},
+		{[]string{"--jsonlint", "."}, false},
 	}
 	for _, c := range cases {
 		if got := wantsJSON(c.args); got != c.want {

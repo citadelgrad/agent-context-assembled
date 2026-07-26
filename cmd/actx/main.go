@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"strconv"
 	"strings"
 
 	"github.com/citadelgrad/actx/internal/compile"
@@ -42,13 +43,22 @@ func main() {
 	os.Exit(exitCode(err))
 }
 
-// wantsJSON pre-scans the raw args for --json/-json so error formatting can
-// match the requested output mode even when flag parsing itself fails (i.e.
-// before run() gets a chance to inspect the parsed *jsonOut value).
+// wantsJSON pre-scans the raw args for --json/-json (including the
+// --json=<value>/-json=<value> forms the flag package also accepts for bool
+// flags) so error formatting can match the requested output mode even when
+// flag parsing itself fails (i.e. before run() gets a chance to inspect the
+// parsed *jsonOut value).
 func wantsJSON(args []string) bool {
 	for _, a := range args {
-		if a == "-json" || a == "--json" {
+		name, value, hasValue := strings.Cut(a, "=")
+		if name != "-json" && name != "--json" {
+			continue
+		}
+		if !hasValue {
 			return true
+		}
+		if b, err := strconv.ParseBool(value); err == nil {
+			return b
 		}
 	}
 	return false
@@ -91,8 +101,13 @@ func run(args []string, w io.Writer) error {
 	liveMode := fs.Bool("live", false, "best-effort runtime introspection: look for real session artifacts showing what a tool actually loaded (see docs/research.md)")
 	toolFilter := fs.String("tool", "", "comma-separated tool slugs to include, e.g. claude-code,codex-cli (default: all supported tools); pass 'list' to print valid slugs and exit")
 	showVersion := fs.Bool("version", false, "print version and exit")
-	fs.SetOutput(io.Discard) // suppress the flag package's own error/usage printing; fs.Usage below prints ours to stderr directly
+	fs.SetOutput(io.Discard) // suppress the flag package's own auto error line (e.g. "flag provided but not defined"); fs.Usage below prints ours to stderr directly
 	fs.Usage = func() {
+		// By the time Usage is called, any auto error line has already been
+		// written to the discarded sink above; re-enable stderr so
+		// fs.PrintDefaults() below (which also writes via fs.Output()) is
+		// actually visible instead of silently discarded.
+		fs.SetOutput(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Usage: actx [path] [flags]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Shows the compiled set of AI coding-agent instruction files that apply at [path]")

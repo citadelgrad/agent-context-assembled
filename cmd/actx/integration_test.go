@@ -191,6 +191,15 @@ func TestIntegrationHelpFlagPrintsUsageAndExitsZero(t *testing.T) {
 	if !strings.Contains(combined, "--compile") || !strings.Contains(combined, "--live") {
 		t.Errorf("expected usage text to document --compile and --live, got: %s", combined)
 	}
+	// These lines only come from fs.PrintDefaults(); if fs.Output() is ever
+	// left pointed at a discard sink when PrintDefaults runs, they vanish
+	// silently while the rest of the (hand-written) usage text still prints.
+	if !strings.Contains(combined, "-tool string") {
+		t.Errorf("expected usage text to include the auto-generated -tool flag description, got: %s", combined)
+	}
+	if !strings.Contains(combined, "-version") {
+		t.Errorf("expected usage text to include the auto-generated -version flag description, got: %s", combined)
+	}
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0 for --help (a help request is not a failure)", code)
 	}
@@ -218,6 +227,30 @@ func TestIntegrationJSONErrorIsStructuredJSON(t *testing.T) {
 	var parsed map[string]string
 	if err := json.Unmarshal([]byte(errOut), &parsed); err != nil {
 		t.Fatalf("stderr under --json is not a valid JSON object: %v\nstderr: %s", err, errOut)
+	}
+	if parsed["error"] == "" {
+		t.Errorf("expected non-empty \"error\" field, got: %v", parsed)
+	}
+}
+
+func TestIntegrationJSONEqualsTrueErrorIsStructuredJSON(t *testing.T) {
+	bin := buildBinary(t)
+
+	// A flag-parse failure (not a runtime error) with --json passed in the
+	// "=value" form the flag package also accepts for bool flags; the error
+	// must still come out as JSON, matching the bare "--json" form. stderr
+	// also carries the usage text on a flag-parse failure (printed by
+	// fs.Usage regardless of --json), so only the final line is the error
+	// object, same as TestIntegrationUnknownFlagExitsTwoWithSingleErrorLine.
+	_, errOut, code := runBinary(t, bin, "--json=true", "--not-a-real-flag")
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2 for a usage error", code)
+	}
+	lines := strings.Split(strings.TrimRight(errOut, "\n"), "\n")
+	lastLine := lines[len(lines)-1]
+	var parsed map[string]string
+	if err := json.Unmarshal([]byte(lastLine), &parsed); err != nil {
+		t.Fatalf("last stderr line under --json=true is not a valid JSON object: %v\nline: %s\nfull stderr: %s", err, lastLine, errOut)
 	}
 	if parsed["error"] == "" {
 		t.Errorf("expected non-empty \"error\" field, got: %v", parsed)
