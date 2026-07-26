@@ -71,8 +71,9 @@ Flags:
   scope tools whose artifacts can be matched to a project directory. See
   [Runtime introspection](#runtime-introspection---live) below.
 - `--tool` — restrict output to a comma-separated list of tool slugs, e.g.
-  `--tool=claude-code,codex-cli`. Pass `--tool=list` to print all valid slugs and exit. An unknown
-  slug is a usage error (exit 2).
+  `--tool=claude-code,codex-cli`. Pass `--tool=list` to print all valid slugs and exit (one per
+  line by default, or a JSON array if combined with `--json`). An unknown slug is a usage error
+  (exit 2).
 - `--version` — print the version and exit.
 
 ### Agent/scripting notes

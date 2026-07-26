@@ -65,6 +65,7 @@ func JSON(w io.Writer, results []scan.ToolResult, opts Options) error {
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
 	return enc.Encode(out)
 }
 
@@ -139,6 +140,7 @@ func CompileJSON(w io.Writer, results []compile.ToolCompile, opts Options) error
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
 	return enc.Encode(out)
 }
 
@@ -215,6 +217,7 @@ func CompileText(w io.Writer, results []compile.ToolCompile, chain scan.Chain, o
 func InspectJSON(w io.Writer, reports []inspect.Report) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
 	return enc.Encode(reports)
 }
 

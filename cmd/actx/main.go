@@ -34,6 +34,7 @@ func main() {
 	}
 	if jsonRequested {
 		enc := json.NewEncoder(os.Stderr)
+		enc.SetEscapeHTML(false)
 		enc.Encode(map[string]string{"error": err.Error()})
 	} else {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -128,8 +129,18 @@ func run(args []string, w io.Writer) error {
 	}
 
 	if *toolFilter == "list" {
+		slugs := make([]string, 0, len(tools.Registry))
 		for _, t := range tools.Registry {
-			fmt.Fprintln(w, t.Slug)
+			slugs = append(slugs, t.Slug)
+		}
+		if *jsonOut {
+			enc := json.NewEncoder(w)
+			enc.SetIndent("", "  ")
+			enc.SetEscapeHTML(false)
+			return enc.Encode(slugs)
+		}
+		for _, s := range slugs {
+			fmt.Fprintln(w, s)
 		}
 		return nil
 	}
