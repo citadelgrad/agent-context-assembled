@@ -1,0 +1,26 @@
+internal/render/render.go
+  s_9836891514eaaa::t_ff78aac0bc2147 220
+  s_9836891514eaaa::t_9e8e97ff1b8548 143
+  s_9836891514eaaa::t_19cf324892d39f 68
+cmd/actx/main.go
+  s_9836891514eaaa::t_c94b50535cbdfa 132,134-143
+  s_9836891514eaaa::t_81cd81aa898125 37
+README.md
+  s_9836891514eaaa::t_91f99323cd26d2 74-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "57c75593fe10aaf134c12db9023eeb8f9508ac08",
+  "prompts": {},
+  "sessions": {
+    "s_9836891514eaaa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "162e6f59-fc28-4c4c-a774-d9325e98dd2b",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
