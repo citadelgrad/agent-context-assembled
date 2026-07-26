@@ -1,5 +1,8 @@
 # actx
 
+[![CI](https://github.com/citadelgrad/actx/actions/workflows/ci.yml/badge.svg)](https://github.com/citadelgrad/actx/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Shows the **full compiled set** of AI coding-agent instruction files that actually apply at a
 given directory — across every major AI coding agent (Claude Code, Codex CLI, GitHub Copilot,
 OpenCode, Cursor, Windsurf, Cline, Aider, Gemini CLI) — not just one tool.
@@ -283,3 +286,11 @@ go build -o actx ./cmd/actx
   lives here.
 - `docs/research.md` — Phase 1 sourced research per tool, plus a runtime-introspection section.
 - `docs/design.md` — Phase 2 algorithm design, including Mermaid diagrams.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE)

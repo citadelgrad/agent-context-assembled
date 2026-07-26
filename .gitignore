@@ -1,0 +1,8 @@
+/actx
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.txt
+.DS_Store
