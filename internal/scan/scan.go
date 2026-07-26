@@ -225,18 +225,24 @@ func scanDownward(t tools.Tool, target string) []MatchedFile {
 			return
 		}
 		visited++
-		for _, lf := range t.LocalFiles {
-			matches := expandCandidate(filepath.Join(dir, lf.Pattern))
-			for _, m := range matches {
-				content, ok := readFile(m)
-				if !ok {
-					continue
+		// depth 0 is target itself, already covered by the ancestor-chain loop
+		// in scanTool (as a "target dir: " match); starting the LocalFiles
+		// check here too would double-count any file living directly in
+		// target rather than in a real subdirectory below it.
+		if depth > 0 {
+			for _, lf := range t.LocalFiles {
+				matches := expandCandidate(filepath.Join(dir, lf.Pattern))
+				for _, m := range matches {
+					content, ok := readFile(m)
+					if !ok {
+						continue
+					}
+					out = append(out, MatchedFile{
+						Path:    m,
+						Content: content,
+						Note:    "subdirectory: " + lf.Note,
+					})
 				}
-				out = append(out, MatchedFile{
-					Path:    m,
-					Content: content,
-					Note:    "subdirectory: " + lf.Note,
-				})
 			}
 		}
 		for _, e := range entries {

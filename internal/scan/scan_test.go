@@ -439,6 +439,34 @@ func TestScanDownwardEagerFindsSubdirectoryFiles(t *testing.T) {
 	}
 }
 
+// TestScanDownwardEagerDoesNotDuplicateTargetDirOwnFile verifies a
+// DownwardEager tool's own-directory match (already found by the
+// ancestor-chain loop in scanTool) isn't re-added a second time by
+// scanDownward's walk, which also visits target itself at depth 0.
+func TestScanDownwardEagerDoesNotDuplicateTargetDirOwnFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	mustMkdirAll(t, target)
+	mustWriteFile(t, filepath.Join(target, "GEMINI.md"), "gemini instructions in target dir")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "gemini-cli")
+	path := filepath.Join(target, "GEMINI.md")
+	count := 0
+	for _, f := range r.Files {
+		if f.Path == path {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected target dir's own GEMINI.md to appear exactly once, got %d; files: %+v", count, r.Files)
+	}
+}
+
 // TestScanDownwardNoneIgnoresSubdirectories verifies a DownwardNone tool
 // (e.g. Codex CLI) never looks below the target directory.
 func TestScanDownwardNoneIgnoresSubdirectories(t *testing.T) {
