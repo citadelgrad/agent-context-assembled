@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/citadelgrad/agent-instructions-viewer/internal/tools"
+	"github.com/citadelgrad/actx/internal/tools"
 )
 
 // MatchedFile is one contributing file for a tool, in application order. Content

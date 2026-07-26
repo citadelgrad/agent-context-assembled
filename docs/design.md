@@ -29,7 +29,7 @@ chain from filesystem root down to `target`, e.g.:
 /Volumes
 /Volumes/qwiizlab
 /Volumes/qwiizlab/projects
-/Volumes/qwiizlab/projects/agent-instructions-viewer
+/Volumes/qwiizlab/projects/actx
 ```
 
 Along the way, note which directory (if any) contains a `.git` entry — that's the "repo root"
@@ -256,7 +256,7 @@ sequenceDiagram
     participant C as compile pkg
     participant R as Renderer
 
-    U->>CLI: agent-instructions-viewer [path] [--json] [--all] [--compile] [--full]
+    U->>CLI: actx [path] [--json] [--all] [--compile] [--full]
     CLI->>FS: resolve target dir (default cwd)
     CLI->>FS: walk ancestors to filesystem root
     FS-->>CLI: ancestor chain + .git boundary
@@ -295,7 +295,7 @@ sequenceDiagram
     participant I as inspect pkg
     participant FS as Filesystem
 
-    U->>CLI: agent-instructions-viewer --live [path] [--json] [--full]
+    U->>CLI: actx --live [path] [--json] [--full]
     CLI->>I: Run(targetDir)
     loop for each of the 9 known tools
         I->>FS: look for tool's session/log/debug artifact

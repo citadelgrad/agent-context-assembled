@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/citadelgrad/agent-instructions-viewer/internal/compile"
-	"github.com/citadelgrad/agent-instructions-viewer/internal/scan"
-	"github.com/citadelgrad/agent-instructions-viewer/internal/tools"
+	"github.com/citadelgrad/actx/internal/compile"
+	"github.com/citadelgrad/actx/internal/scan"
+	"github.com/citadelgrad/actx/internal/tools"
 )
 
 // toolBySlug looks up a tools.Registry entry by slug, failing the test if

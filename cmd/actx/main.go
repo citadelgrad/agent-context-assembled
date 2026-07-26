@@ -1,4 +1,4 @@
-// Command agent-instructions-viewer shows the full compiled set of AI coding-agent
+// Command actx shows the full compiled set of AI coding-agent
 // instruction files that apply at a given directory, across every major AI coding
 // agent, by walking the directory tree and each tool's global config location and
 // applying that tool's own real discovery/precedence rules. See docs/design.md.
@@ -10,10 +10,10 @@ import (
 	"io"
 	"os"
 
-	"github.com/citadelgrad/agent-instructions-viewer/internal/compile"
-	"github.com/citadelgrad/agent-instructions-viewer/internal/inspect"
-	"github.com/citadelgrad/agent-instructions-viewer/internal/render"
-	"github.com/citadelgrad/agent-instructions-viewer/internal/scan"
+	"github.com/citadelgrad/actx/internal/compile"
+	"github.com/citadelgrad/actx/internal/inspect"
+	"github.com/citadelgrad/actx/internal/render"
+	"github.com/citadelgrad/actx/internal/scan"
 )
 
 func main() {
@@ -27,14 +27,14 @@ func main() {
 // main; a buffer in tests) so behavior can be verified hermetically without
 // capturing the real process stdout.
 func run(args []string, w io.Writer) error {
-	fs := flag.NewFlagSet("agent-instructions-viewer", flag.ContinueOnError)
+	fs := flag.NewFlagSet("actx", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "output structured JSON instead of text")
 	all := fs.Bool("all", false, "include every supported tool, even ones with no contributing files")
 	full := fs.Bool("full", false, "show full file content in text output instead of a truncated preview")
 	compileMode := fs.Bool("compile", false, "show the assembled 'effective compiled context' per tool instead of the raw file list")
 	liveMode := fs.Bool("live", false, "best-effort runtime introspection: look for real session artifacts showing what a tool actually loaded (see docs/research.md)")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: agent-instructions-viewer [path] [flags]")
+		fmt.Fprintln(os.Stderr, "Usage: actx [path] [flags]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Shows the compiled set of AI coding-agent instruction files that apply at [path]")
 		fmt.Fprintln(os.Stderr, "(default: current directory), across Claude Code, Codex CLI, GitHub Copilot,")

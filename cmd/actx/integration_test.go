@@ -1,6 +1,6 @@
 package main
 
-// Integration tests: these build the real agent-instructions-viewer binary
+// Integration tests: these build the real actx binary
 // and exercise it as a subprocess (real flag parsing, real os.Exit/stderr
 // behavior, real stdout stream) -- unlike main_test.go, which calls run()
 // in-process. Both are useful: main_test.go is faster and covers more cases,
@@ -21,7 +21,7 @@ import (
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
-	binPath := filepath.Join(binDir, "agent-instructions-viewer")
+	binPath := filepath.Join(binDir, "actx")
 	if runtime.GOOS == "windows" {
 		binPath += ".exe"
 	}

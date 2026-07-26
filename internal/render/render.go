@@ -8,9 +8,9 @@ import (
 	"io"
 	"strings"
 
-	"github.com/citadelgrad/agent-instructions-viewer/internal/compile"
-	"github.com/citadelgrad/agent-instructions-viewer/internal/inspect"
-	"github.com/citadelgrad/agent-instructions-viewer/internal/scan"
+	"github.com/citadelgrad/actx/internal/compile"
+	"github.com/citadelgrad/actx/internal/inspect"
+	"github.com/citadelgrad/actx/internal/scan"
 )
 
 // Options controls rendering.

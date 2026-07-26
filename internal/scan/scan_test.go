@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/citadelgrad/agent-instructions-viewer/internal/tools"
+	"github.com/citadelgrad/actx/internal/tools"
 )
 
 // mustMkdirAll is a small test helper wrapping os.MkdirAll with a t.Fatal.

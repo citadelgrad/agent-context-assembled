@@ -1,4 +1,4 @@
-# agent-instructions-viewer
+# actx
 
 Shows the **full compiled set** of AI coding-agent instruction files that actually apply at a
 given directory — across every major AI coding agent (Claude Code, Codex CLI, GitHub Copilot,
@@ -49,7 +49,7 @@ scope (a repo-root-limited tool won't show you that org-wide file, even though t
 ## Usage
 
 ```
-agent-instructions-viewer [path] [flags]
+actx [path] [flags]
 ```
 
 `path` defaults to the current directory.
@@ -75,37 +75,37 @@ Flags:
 Show the compiled view for the current directory:
 
 ```
-agent-instructions-viewer
+actx
 ```
 
 Show it for another path, listing every supported tool (including ones with nothing found):
 
 ```
-agent-instructions-viewer --all /path/to/some/repo/subdir
+actx --all /path/to/some/repo/subdir
 ```
 
 Get machine-readable output, e.g. to pipe into `jq`:
 
 ```
-agent-instructions-viewer --json . | jq '.[].tool'
+actx --json . | jq '.[].tool'
 ```
 
 Show the assembled effective context per tool, with token estimates:
 
 ```
-agent-instructions-viewer --compile
+actx --compile
 ```
 
 Same, as JSON:
 
 ```
-agent-instructions-viewer --compile --json . | jq '.[] | {tool, tokenEstimate}'
+actx --compile --json . | jq '.[] | {tool, tokenEstimate}'
 ```
 
 Check what a tool actually loaded in a real session (best-effort):
 
 ```
-agent-instructions-viewer --live
+actx --live
 ```
 
 ### JSON shape
@@ -246,12 +246,12 @@ dependency.
 ## Build
 
 ```
-go build -o agent-instructions-viewer ./cmd/agent-instructions-viewer
+go build -o actx ./cmd/actx
 ```
 
 ## Project layout
 
-- `cmd/agent-instructions-viewer/` — CLI entry point (flag parsing, dispatch to scan/compile/inspect+render).
+- `cmd/actx/` — CLI entry point (flag parsing, dispatch to scan/compile/inspect+render).
 - `internal/tools/` — static per-tool specs (filenames, scope, precedence, global config paths).
 - `internal/scan/` — directory-walk + file-matching engine; always returns full file content.
 - `internal/compile/` — `--compile`: assembles matched files per tool's real merge model, with
