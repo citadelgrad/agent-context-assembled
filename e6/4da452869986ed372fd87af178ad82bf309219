@@ -1,0 +1,28 @@
+CONTRIBUTING.md
+  s_5babfbdcb26eb3::t_a929edb27cddf9 1-36
+LICENSE
+  s_5babfbdcb26eb3::t_d80b48456254aa 1-21
+README.md
+  s_5babfbdcb26eb3::t_0f9ee8bbac5486 3-5
+  s_5babfbdcb26eb3::t_11b9091d7b02af 289-296
+.gitignore
+  s_5babfbdcb26eb3::t_cc7961b7c4eec7 1-8
+.github/workflows/ci.yml
+  s_5babfbdcb26eb3::t_6d62b09c0a1a1e 1-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "e64da452869986ed372fd87af178ad82bf309219",
+  "prompts": {},
+  "sessions": {
+    "s_5babfbdcb26eb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66f766d4-9802-411a-a7fc-769862af9961",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
