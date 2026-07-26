@@ -3,11 +3,46 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestWantsJSON(t *testing.T) {
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"--json", "."}, true},
+		{[]string{"-json"}, true},
+		{[]string{"--compile", "."}, false},
+		{nil, false},
+	}
+	for _, c := range cases {
+		if got := wantsJSON(c.args); got != c.want {
+			t.Errorf("wantsJSON(%v) = %v, want %v", c.args, got, c.want)
+		}
+	}
+}
+
+func TestExitCode(t *testing.T) {
+	if got := exitCode(&usageError{errors.New("bad flag")}); got != 2 {
+		t.Errorf("exitCode(usageError) = %d, want 2", got)
+	}
+	if got := exitCode(errors.New("runtime failure")); got != 1 {
+		t.Errorf("exitCode(plain error) = %d, want 1", got)
+	}
+}
+
+func TestUsageErrorUnwrap(t *testing.T) {
+	inner := errors.New("inner")
+	ue := &usageError{inner}
+	if !errors.Is(ue, inner) {
+		t.Errorf("expected errors.Is to see through usageError.Unwrap to the inner error")
+	}
+}
 
 func mustWriteFile(t *testing.T, path, content string) {
 	t.Helper()
@@ -273,6 +308,80 @@ func TestRunErrorsOnUnknownFlag(t *testing.T) {
 	err := run([]string{"--not-a-real-flag"}, &buf)
 	if err == nil {
 		t.Fatal("expected error for unknown flag, got nil")
+	}
+}
+
+func TestRunToolFilterNarrowsToSpecifiedSlug(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "CLAUDE.md"), "claude content")
+	mustWriteFile(t, filepath.Join(dir, "AGENTS.md"), "codex content")
+
+	var buf bytes.Buffer
+	if err := run([]string{"--json", "--tool=codex-cli", dir}, &buf); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("output is not valid JSON: %v\nbody: %s", err, buf.String())
+	}
+	if len(out) != 1 || out[0]["slug"] != "codex-cli" {
+		t.Fatalf("expected exactly one tool (codex-cli), got: %v", out)
+	}
+}
+
+func TestRunToolFilterUnknownSlugErrors(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+
+	var buf bytes.Buffer
+	err := run([]string{"--tool=not-a-real-tool", dir}, &buf)
+	if err == nil {
+		t.Fatal("expected error for unknown tool slug, got nil")
+	}
+	if !strings.Contains(err.Error(), "not-a-real-tool") {
+		t.Errorf("error = %v, want it to mention the bad slug", err)
+	}
+}
+
+func TestRunToolFilterListPrintsSlugs(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+
+	var buf bytes.Buffer
+	if err := run([]string{"--tool=list", dir}, &buf); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "claude-code") {
+		t.Errorf("expected --tool=list to print known slugs, got:\n%s", buf.String())
+	}
+}
+
+func TestRunToolFilterAppliesToLiveMode(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+
+	var buf bytes.Buffer
+	if err := run([]string{"--live", "--json", "--tool=claude-code", dir}, &buf); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("output is not valid JSON: %v\nbody: %s", err, buf.String())
+	}
+	if len(out) != 1 || out[0]["slug"] != "claude-code" {
+		t.Fatalf("expected exactly one report (claude-code), got: %v", out)
+	}
+}
+
+func TestRunVersionFlagPrintsVersion(t *testing.T) {
+	isolateHome(t)
+	var buf bytes.Buffer
+	if err := run([]string{"--version"}, &buf); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "actx") {
+		t.Errorf("expected --version output to mention actx, got:\n%s", buf.String())
 	}
 }
 

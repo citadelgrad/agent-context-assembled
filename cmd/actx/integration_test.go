@@ -180,7 +180,7 @@ func TestIntegrationFileInsteadOfDirectoryFails(t *testing.T) {
 	}
 }
 
-func TestIntegrationHelpFlagPrintsUsage(t *testing.T) {
+func TestIntegrationHelpFlagPrintsUsageAndExitsZero(t *testing.T) {
 	bin := buildBinary(t)
 
 	out, errOut, code := runBinary(t, bin, "--help")
@@ -191,5 +191,79 @@ func TestIntegrationHelpFlagPrintsUsage(t *testing.T) {
 	if !strings.Contains(combined, "--compile") || !strings.Contains(combined, "--live") {
 		t.Errorf("expected usage text to document --compile and --live, got: %s", combined)
 	}
-	_ = code // flag.ContinueOnError + Usage still exits nonzero on -h; not asserted here, just that usage prints.
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 for --help (a help request is not a failure)", code)
+	}
+}
+
+func TestIntegrationUnknownFlagExitsTwoWithSingleErrorLine(t *testing.T) {
+	bin := buildBinary(t)
+
+	_, errOut, code := runBinary(t, bin, "--not-a-real-flag")
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2 for a usage error", code)
+	}
+	if strings.Count(errOut, "flag provided but not defined") != 1 {
+		t.Errorf("expected exactly one occurrence of the error message on stderr, got: %s", errOut)
+	}
+}
+
+func TestIntegrationJSONErrorIsStructuredJSON(t *testing.T) {
+	bin := buildBinary(t)
+
+	_, errOut, code := runBinary(t, bin, "--json", "/this/path/does/not/exist/anywhere")
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1 for a runtime error", code)
+	}
+	var parsed map[string]string
+	if err := json.Unmarshal([]byte(errOut), &parsed); err != nil {
+		t.Fatalf("stderr under --json is not a valid JSON object: %v\nstderr: %s", err, errOut)
+	}
+	if parsed["error"] == "" {
+		t.Errorf("expected non-empty \"error\" field, got: %v", parsed)
+	}
+}
+
+func TestIntegrationUnknownToolSlugExitsTwo(t *testing.T) {
+	bin := buildBinary(t)
+	dir := t.TempDir()
+
+	_, errOut, code := runBinary(t, bin, "--tool=bogus-slug", dir)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2 for an unknown --tool slug", code)
+	}
+	if !strings.Contains(errOut, "bogus-slug") {
+		t.Errorf("expected error to mention the bad slug, got: %s", errOut)
+	}
+}
+
+func TestIntegrationToolFilterFlagNarrowsOutput(t *testing.T) {
+	bin := buildBinary(t)
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "CLAUDE.md"), "claude content")
+	mustWriteFile(t, filepath.Join(dir, "AGENTS.md"), "codex content")
+
+	out, errOut, code := runBinary(t, bin, "--json", "--tool=codex-cli", dir)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr: %s", code, errOut)
+	}
+	var parsed []map[string]any
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\noutput: %s", err, out)
+	}
+	if len(parsed) != 1 || parsed[0]["slug"] != "codex-cli" {
+		t.Fatalf("expected exactly one tool (codex-cli), got: %v", parsed)
+	}
+}
+
+func TestIntegrationVersionFlagPrintsVersionAndExitsZero(t *testing.T) {
+	bin := buildBinary(t)
+
+	out, errOut, code := runBinary(t, bin, "--version")
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr: %s", code, errOut)
+	}
+	if !strings.Contains(out, "actx") {
+		t.Errorf("expected --version output to mention actx, got: %s", out)
+	}
 }

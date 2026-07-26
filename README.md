@@ -66,9 +66,29 @@ Flags:
   [Compiled-context preview](#compiled-context-preview---compile) below.
 - `--live` — best-effort runtime introspection: look for real on-disk session artifacts (or name
   a documented interactive mechanism) showing what a tool *actually* loaded in a real session, as
-  opposed to what it would predict from files on disk. Ignores the directory-walk/scan flags
-  (`--all` has no effect); still takes `[path]` to scope tools whose artifacts can be matched to a
-  project directory. See [Runtime introspection](#runtime-introspection---live) below.
+  opposed to what it would predict from files on disk. Every tool is always reported (`--all` has
+  no effect, since a "nothing found" result is itself meaningful here); still takes `[path]` to
+  scope tools whose artifacts can be matched to a project directory. See
+  [Runtime introspection](#runtime-introspection---live) below.
+- `--tool` — restrict output to a comma-separated list of tool slugs, e.g.
+  `--tool=claude-code,codex-cli`. Pass `--tool=list` to print all valid slugs and exit. An unknown
+  slug is a usage error (exit 2).
+- `--version` — print the version and exit.
+
+### Agent/scripting notes
+
+- **Errors**: on failure, a message goes to stderr and the process exits non-zero. Under `--json`,
+  the error is a JSON object (`{"error": "..."}`) instead of plain text, so stderr stays parseable
+  in either mode.
+- **Exit codes**: `0` success, `1` runtime error (bad path, scan failure), `2` usage error (bad
+  flag, unknown `--tool` slug). `--help`/`-h` prints usage and exits `0` (it's a request, not a
+  failure).
+- **Stable identifiers**: every tool carries the same `slug` field across all three JSON output
+  modes (default, `--compile`, `--live`) — use it for filtering/joining rather than the display
+  `tool` name, which is free-form text.
+- **Tool-count consistency**: default and `--compile` JSON omit tools with no contributing files
+  unless `--all` is passed; `--live` JSON always includes every tool regardless of `--all` (see
+  above). Pass `--all` explicitly if your caller assumes a fixed-length array.
 
 ### Examples
 
