@@ -1,0 +1,39 @@
+internal/render/render_test.go
+  s_176849a1d8430f::t_a9a60f08ed42a4 10-14
+docs/design.md
+  s_176849a1d8430f::t_a9a60f08ed42a4 32,259,298
+cmd/actx/main.go
+  s_176849a1d8430f::t_a9a60f08ed42a4 1-101
+go.mod
+  s_176849a1d8430f::t_a9a60f08ed42a4 1
+internal/compile/compile_test.go
+  s_176849a1d8430f::t_a9a60f08ed42a4 7-9
+internal/compile/compile.go
+  s_176849a1d8430f::t_a9a60f08ed42a4 18-19
+internal/render/render.go
+  s_176849a1d8430f::t_a9a60f08ed42a4 11-13
+internal/scan/scan.go
+  s_176849a1d8430f::t_a9a60f08ed42a4 11
+internal/scan/scan_test.go
+  s_176849a1d8430f::t_a9a60f08ed42a4 8
+README.md
+  s_176849a1d8430f::t_a9a60f08ed42a4 1,52,78,84,90,96,102,108,249,254
+cmd/actx/integration_test.go
+  s_176849a1d8430f::t_a9a60f08ed42a4 1-195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "d3120268874c72671978f3641014ef09c710a575",
+  "prompts": {},
+  "sessions": {
+    "s_176849a1d8430f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af9d7696-02b0-4625-90ab-dd8f2ea04d2b",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
