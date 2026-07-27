@@ -78,12 +78,21 @@ Flags:
   line by default, or a JSON array if combined with `--json`). An unknown slug is a usage error
   (exit 2).
 - `--version` — print the version and exit.
+- `--max-chars` — safety cap on total output size in characters (default `80000`, ~20,000 tokens
+  at this tool's `len/4` estimate). Output over the cap is written to a temp file instead of
+  stdout, with a short notice (structured JSON in `--json` mode) printed in its place — so a large
+  scan can't silently fill a calling agent's context window. This is an actx-side default, not a
+  claim about any tool's own limit (compare the sourced, documented limits under `LimitChecks` in
+  `--compile` output). Pass `--max-chars=0` to disable the cap and always print full output.
 
 ### Agent/scripting notes
 
 - **Errors**: on failure, a message goes to stderr and the process exits non-zero. Under `--json`,
   the error is a JSON object (`{"error": "..."}`) instead of plain text, so stderr stays parseable
   in either mode.
+- **Output size guard**: any mode/flag combination can trigger the `--max-chars` overflow notice
+  above (default 80000 chars) — check for a `truncated: true` field in JSON output, or the text
+  "Output too large" in text output, rather than assuming a response always contains real content.
 - **Exit codes**: `0` success, `1` runtime error (bad path, scan failure), `2` usage error (bad
   flag, unknown `--tool` slug). `--help`/`-h` prints usage and exits `0` (it's a request, not a
   failure).

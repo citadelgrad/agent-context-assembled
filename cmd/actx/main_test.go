@@ -226,6 +226,113 @@ func TestRunCompileJSONModeProducesValidJSON(t *testing.T) {
 	}
 }
 
+func TestRunMaxCharsWritesOverflowNoticeInTextMode(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "CLAUDE.md"), "this content is long enough to exceed a tiny max-chars cap")
+
+	var buf bytes.Buffer
+	if err := run([]string{"--max-chars=50", dir}, &buf); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Output too large") {
+		t.Fatalf("expected overflow notice, got:\n%s", out)
+	}
+	if !strings.Contains(out, "50-char safety cap") {
+		t.Errorf("expected notice to mention the configured cap, got:\n%s", out)
+	}
+
+	path := extractOverflowFilePath(t, out)
+	defer os.Remove(path)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading overflow file %s: %v", path, err)
+	}
+	if !strings.Contains(string(content), "this content is long enough") {
+		t.Errorf("expected overflow file to contain the full untruncated output, got:\n%s", content)
+	}
+}
+
+func TestRunMaxCharsWritesOverflowNoticeInJSONMode(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "CLAUDE.md"), "this content is long enough to exceed a tiny max-chars cap")
+
+	var buf bytes.Buffer
+	if err := run([]string{"--max-chars=50", "--json", dir}, &buf); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	var notice outputOverflow
+	if err := json.Unmarshal(buf.Bytes(), &notice); err != nil {
+		t.Fatalf("overflow notice is not valid JSON: %v\nbody: %s", err, buf.String())
+	}
+	if !notice.Truncated {
+		t.Errorf("expected truncated=true, got %+v", notice)
+	}
+	if notice.CharCount <= 50 {
+		t.Errorf("expected charCount > 50, got %d", notice.CharCount)
+	}
+	if notice.OutputFile == "" {
+		t.Fatal("expected a non-empty outputFile path")
+	}
+	defer os.Remove(notice.OutputFile)
+	content, err := os.ReadFile(notice.OutputFile)
+	if err != nil {
+		t.Fatalf("reading overflow file %s: %v", notice.OutputFile, err)
+	}
+	var full []map[string]any
+	if err := json.Unmarshal(content, &full); err != nil {
+		t.Fatalf("overflow file is not the full valid JSON output: %v\nbody: %s", err, content)
+	}
+}
+
+func TestRunMaxCharsZeroDisablesCap(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "CLAUDE.md"), "this content is long enough to exceed a tiny max-chars cap")
+
+	var buf bytes.Buffer
+	if err := run([]string{"--max-chars=0", dir}, &buf); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "Output too large") {
+		t.Errorf("expected --max-chars=0 to disable the cap entirely, got:\n%s", out)
+	}
+	if !strings.Contains(out, "this content is long enough") {
+		t.Errorf("expected full content inline, got:\n%s", out)
+	}
+}
+
+func TestRunDefaultMaxCharsDoesNotTriggerForSmallOutput(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "CLAUDE.md"), "small content")
+
+	var buf bytes.Buffer
+	if err := run([]string{dir}, &buf); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	if strings.Contains(buf.String(), "Output too large") {
+		t.Errorf("did not expect the default cap to trigger for small output, got:\n%s", buf.String())
+	}
+}
+
+// extractOverflowFilePath pulls the path out of writeSizeGuarded's
+// "Full output written to: <path>" text-mode notice line.
+func extractOverflowFilePath(t *testing.T, out string) string {
+	t.Helper()
+	const prefix = "Full output written to: "
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	t.Fatalf("no overflow file path found in output:\n%s", out)
+	return ""
+}
+
 func TestRunLiveModeProducesNineReports(t *testing.T) {
 	isolateHome(t)
 	dir := t.TempDir()
