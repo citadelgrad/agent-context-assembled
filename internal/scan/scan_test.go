@@ -1,9 +1,11 @@
 package scan
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/citadelgrad/actx/internal/tools"
 )
@@ -516,6 +518,202 @@ func TestScanDownwardEagerSkipsNoiseDirectories(t *testing.T) {
 	}
 	if !hasPath(r.Files, filepath.Join(target, "keep", "GEMINI.md")) {
 		t.Error("should still find files in ordinary subdirectories")
+	}
+}
+
+// TestScanDownwardEagerSkipsTargetDirectory verifies scanDownward skips a
+// directory literally named "target" (Rust/Cargo build output), the same way
+// it already skips .git, node_modules, and vendor (actx-7vc), while still
+// finding legitimate matches in sibling, non-skipped subdirectories.
+func TestScanDownwardEagerSkipsTargetDirectory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	mustMkdirAll(t, target)
+	mustWriteFile(t, filepath.Join(target, "target", "debug", "GEMINI.md"), "should be skipped")
+	mustWriteFile(t, filepath.Join(target, "keep", "GEMINI.md"), "should be found")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "gemini-cli")
+	if hasPath(r.Files, filepath.Join(target, "target", "debug", "GEMINI.md")) {
+		t.Error("should not descend into target/ (Rust/Cargo build output)")
+	}
+	if !hasPath(r.Files, filepath.Join(target, "keep", "GEMINI.md")) {
+		t.Error("should still find files in ordinary sibling subdirectories")
+	}
+}
+
+// TestScanDownwardEagerDoesNotSkipTargetsLookalikeWithoutTag verifies a
+// directory merely named similarly to "target" (e.g. "targets", plural) is
+// walked normally: the skip is an exact-name match, not a prefix match, and
+// there's no CACHEDIR.TAG here either.
+func TestScanDownwardEagerDoesNotSkipTargetsLookalikeWithoutTag(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	mustMkdirAll(t, target)
+	mustWriteFile(t, filepath.Join(target, "targets", "GEMINI.md"), "should be found: \"targets\" != \"target\"")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "gemini-cli")
+	if !hasPath(r.Files, filepath.Join(target, "targets", "GEMINI.md")) {
+		t.Errorf(`gemini-cli should still walk into "targets" (not exactly "target", no CACHEDIR.TAG); got files: %+v`, r.Files)
+	}
+}
+
+// TestScanDownwardEagerSkipsCachedirTaggedDirectory verifies scanDownward
+// generically skips any directory containing a CACHEDIR.TAG regular file
+// directly inside it (the Cache Directory Tagging Standard, actx-7vc),
+// covering build/cache dirs beyond the hardcoded name list -- while still
+// finding legitimate matches in sibling, non-skipped subdirectories.
+func TestScanDownwardEagerSkipsCachedirTaggedDirectory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	cacheDir := filepath.Join(target, "buildcache")
+	mustMkdirAll(t, cacheDir)
+	mustWriteFile(t, filepath.Join(cacheDir, "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n")
+	mustWriteFile(t, filepath.Join(cacheDir, "nested", "GEMINI.md"), "should be skipped")
+	mustWriteFile(t, filepath.Join(target, "keep", "GEMINI.md"), "should be found")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "gemini-cli")
+	if hasPath(r.Files, filepath.Join(cacheDir, "nested", "GEMINI.md")) {
+		t.Error("should not descend into a CACHEDIR.TAG-tagged directory")
+	}
+	if !hasPath(r.Files, filepath.Join(target, "keep", "GEMINI.md")) {
+		t.Error("should still find files in ordinary sibling subdirectories")
+	}
+}
+
+// TestScanDownwardEagerCachedirTagMustBeDirectChild verifies the CACHEDIR.TAG
+// check only fires when the tag file sits directly inside the candidate
+// directory (not an ancestor or descendant) -- a tag file one level deeper,
+// inside a grandchild rather than the child itself, must not cause the child
+// to be skipped.
+func TestScanDownwardEagerCachedirTagMustBeDirectChild(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	mustMkdirAll(t, target)
+	// CACHEDIR.TAG lives in outer/nested/, not directly in outer/ itself --
+	// outer/ must still be walked normally.
+	mustWriteFile(t, filepath.Join(target, "outer", "nested", "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n")
+	mustWriteFile(t, filepath.Join(target, "outer", "GEMINI.md"), "should be found: CACHEDIR.TAG is not directly in outer/")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "gemini-cli")
+	if !hasPath(r.Files, filepath.Join(target, "outer", "GEMINI.md")) {
+		t.Errorf("outer/ should be walked normally since CACHEDIR.TAG is not directly inside it; got files: %+v", r.Files)
+	}
+}
+
+// TestScanDownwardEagerCachedirTagMustBeRegularFile verifies a directory
+// literally named CACHEDIR.TAG does not tag its parent as a cache directory
+// -- only a regular file does, per the Cache Directory Tagging Standard.
+func TestScanDownwardEagerCachedirTagMustBeRegularFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	mustMkdirAll(t, target)
+	// CACHEDIR.TAG is a directory here, not a regular file -- must not trigger the skip.
+	mustWriteFile(t, filepath.Join(target, "weird", "CACHEDIR.TAG", "placeholder.txt"), "irrelevant")
+	mustWriteFile(t, filepath.Join(target, "weird", "GEMINI.md"), "should be found")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "gemini-cli")
+	if !hasPath(r.Files, filepath.Join(target, "weird", "GEMINI.md")) {
+		t.Errorf("weird/ should be walked normally since CACHEDIR.TAG there is a directory, not a regular file; got files: %+v", r.Files)
+	}
+}
+
+// TestScanDownwardEagerSkipsLargeTargetDirectoryFast is a regression test for
+// actx-7vc: pre-fix, scanDownward walked into Rust's target/ build directory
+// and only stopped after hitting its maxDirsVisited=500 cap, having opened
+// hundreds of subdirectories (one os.ReadDir syscall each) for zero matched
+// files. This builds a target/ directory with more than 500 subdirectories
+// directly inside it, each holding a "trap" GEMINI.md one level deeper that
+// must never be reached, and asserts the scan both returns quickly and never
+// descends past target/ itself.
+func TestScanDownwardEagerSkipsLargeTargetDirectoryFast(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	mustMkdirAll(t, target)
+
+	const numEntries = 600
+	for i := 0; i < numEntries; i++ {
+		mustWriteFile(t, filepath.Join(target, "target", fmt.Sprintf("artifact%d", i), "GEMINI.md"), "should never be reached")
+	}
+
+	start := time.Now()
+	results, _, err := Run(target, Options{})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("scanDownward took %s for a target/ dir with %d entries; expected it to skip target/ by name and return quickly", elapsed, numEntries)
+	}
+
+	r := findResult(t, results, "gemini-cli")
+	for i := 0; i < numEntries; i++ {
+		trap := filepath.Join(target, "target", fmt.Sprintf("artifact%d", i), "GEMINI.md")
+		if hasPath(r.Files, trap) {
+			t.Fatalf("scanDownward descended into target/artifact%d despite the target/ skip; found %s", i, trap)
+		}
+	}
+}
+
+// TestScanDownwardEagerSkipsLargeCachedirTaggedDirectoryFast is the
+// CACHEDIR.TAG counterpart of TestScanDownwardEagerSkipsLargeTargetDirectoryFast
+// (actx-7vc): a directory that isn't named "target" but is tagged with
+// CACHEDIR.TAG and contains more than 500 entries must still be skipped
+// quickly, without descending into any of them.
+func TestScanDownwardEagerSkipsLargeCachedirTaggedDirectoryFast(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	cacheDir := filepath.Join(target, "buildcache")
+	mustMkdirAll(t, cacheDir)
+	mustWriteFile(t, filepath.Join(cacheDir, "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n")
+
+	const numEntries = 600
+	for i := 0; i < numEntries; i++ {
+		mustWriteFile(t, filepath.Join(cacheDir, fmt.Sprintf("artifact%d", i), "GEMINI.md"), "should never be reached")
+	}
+
+	start := time.Now()
+	results, _, err := Run(target, Options{})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("scanDownward took %s for a CACHEDIR.TAG-tagged dir with %d entries; expected a fast skip", elapsed, numEntries)
+	}
+
+	r := findResult(t, results, "gemini-cli")
+	for i := 0; i < numEntries; i++ {
+		trap := filepath.Join(cacheDir, fmt.Sprintf("artifact%d", i), "GEMINI.md")
+		if hasPath(r.Files, trap) {
+			t.Fatalf("scanDownward descended into the CACHEDIR.TAG-tagged dir despite the tag; found %s", trap)
+		}
 	}
 }
 
