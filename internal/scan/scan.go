@@ -66,14 +66,8 @@ func BuildChain(target string) (Chain, error) {
 		dirs[len(reversed)-1-i] = d
 	}
 
+	// Prefer the .git closest to target, not closest to root: scan from the end.
 	gitRootIndex := -1
-	for i, d := range dirs {
-		if isDir(filepath.Join(d, ".git")) || isFile(filepath.Join(d, ".git")) {
-			gitRootIndex = i
-			break // nearest to root; but we want nearest to target, so keep scanning
-		}
-	}
-	// Prefer the .git closest to target, not closest to root: rescan from the end.
 	for i := len(dirs) - 1; i >= 0; i-- {
 		if isDir(filepath.Join(dirs[i], ".git")) || isFile(filepath.Join(dirs[i], ".git")) {
 			gitRootIndex = i

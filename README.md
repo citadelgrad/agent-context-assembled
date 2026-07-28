@@ -52,10 +52,11 @@ scope (a repo-root-limited tool won't show you that org-wide file, even though t
 ## Usage
 
 ```
-actx [path] [flags]
+actx [flags] [path]
 ```
 
-`path` defaults to the current directory.
+`path` defaults to the current directory. Flags must come before `path` (Go's flag
+parser stops at the first non-flag argument), e.g. `actx --json .`, not `actx . --json`.
 
 Flags:
 

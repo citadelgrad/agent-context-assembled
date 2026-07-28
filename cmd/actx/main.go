@@ -116,21 +116,24 @@ func main() {
 // --json=<value>/-json=<value> forms the flag package also accepts for bool
 // flags) so error formatting can match the requested output mode even when
 // flag parsing itself fails (i.e. before run() gets a chance to inspect the
-// parsed *jsonOut value).
+// parsed *jsonOut value). Like flag.Parse, the last occurrence wins if --json
+// is passed more than once.
 func wantsJSON(args []string) bool {
+	want := false
 	for _, a := range args {
 		name, value, hasValue := strings.Cut(a, "=")
 		if name != "-json" && name != "--json" {
 			continue
 		}
 		if !hasValue {
-			return true
+			want = true
+			continue
 		}
 		if b, err := strconv.ParseBool(value); err == nil {
-			return b
+			want = b
 		}
 	}
-	return false
+	return want
 }
 
 // usageError marks errors caused by invalid CLI invocation (bad flags,
@@ -178,11 +181,11 @@ func run(args []string, w io.Writer) error {
 		// fs.PrintDefaults() below (which also writes via fs.Output()) is
 		// actually visible instead of silently discarded.
 		fs.SetOutput(os.Stderr)
-		fmt.Fprintln(os.Stderr, "Usage: actx [path] [flags]")
+		fmt.Fprintln(os.Stderr, "Usage: actx [flags] [path]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Shows the compiled set of AI coding-agent instruction files that apply at [path]")
 		fmt.Fprintln(os.Stderr, "(default: current directory), across Claude Code, Codex CLI, GitHub Copilot,")
-		fmt.Fprintln(os.Stderr, "OpenCode, Cursor, Windsurf, Cline, Aider, and Gemini CLI.")
+		fmt.Fprintln(os.Stderr, "OpenCode, Cursor, Windsurf, Cline, Aider, Gemini CLI, and Hermes.")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Modes:")
 		fmt.Fprintln(os.Stderr, "  (default)   list matched instruction files per tool, in real application order")
@@ -194,6 +197,8 @@ func run(args []string, w io.Writer) error {
 		fmt.Fprintln(os.Stderr, "              (even a 'none found' result), regardless of --all")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Agent/scripting notes:")
+		fmt.Fprintln(os.Stderr, "  - Flags must come before [path] (Go's flag parser stops at the first non-flag arg);")
+		fmt.Fprintln(os.Stderr, "    e.g. 'actx --json .', not 'actx . --json'.")
 		fmt.Fprintln(os.Stderr, "  - On failure, errors go to stderr; under --json they're a JSON object {\"error\": \"...\"}")
 		fmt.Fprintln(os.Stderr, "    instead of plain text. Exit codes: 0 success, 1 runtime error, 2 usage error.")
 		fmt.Fprintln(os.Stderr, "  - Every tool has a stable 'slug' field in JSON output; use --tool to filter by it.")
@@ -208,6 +213,10 @@ func run(args []string, w io.Writer) error {
 			return err
 		}
 		return &usageError{err}
+	}
+
+	if fs.NArg() > 1 {
+		return &usageError{fmt.Errorf("unexpected extra argument(s) %v after path %q -- flags must come before [path], e.g. \"actx --json %s\" not \"actx %s --json\"", fs.Args()[1:], fs.Arg(0), fs.Arg(0), fs.Arg(0))}
 	}
 
 	if *showVersion {

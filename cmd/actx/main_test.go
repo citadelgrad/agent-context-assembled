@@ -25,6 +25,8 @@ func TestWantsJSON(t *testing.T) {
 		{[]string{"--json=1", "."}, true},
 		{[]string{"--json=0", "."}, false},
 		{[]string{"--jsonlint", "."}, false},
+		{[]string{"--json=true", "--json=false"}, false},
+		{[]string{"--json=false", "--json"}, true},
 	}
 	for _, c := range cases {
 		if got := wantsJSON(c.args); got != c.want {
@@ -122,19 +124,20 @@ func TestRunJSONModeProducesValidJSON(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatalf("output is not valid JSON: %v\nbody: %s", err, buf.String())
 	}
-	// A bare CLAUDE.md matches both claude-code (its native file) and
-	// opencode (documented CLAUDE.md compat fallback per internal/tools
-	// registry) -- confirmed empirically, not a bug. --all not given, so
-	// only these two non-empty tools should appear.
-	if len(out) != 2 {
-		t.Fatalf("got %d tools, want 2 (claude-code + opencode's documented CLAUDE.md compat fallback, --all not given)", len(out))
+	// A bare CLAUDE.md matches claude-code (its native file), opencode
+	// (documented CLAUDE.md compat fallback), and hermes (documented
+	// cwd-only CLAUDE.md compat fallback) per internal/tools registry --
+	// confirmed empirically, not a bug. --all not given, so only these
+	// three non-empty tools should appear.
+	if len(out) != 3 {
+		t.Fatalf("got %d tools, want 3 (claude-code + opencode + hermes's documented CLAUDE.md compat fallbacks, --all not given)", len(out))
 	}
 	slugs := map[string]bool{}
 	for _, tool := range out {
 		slugs[tool["slug"].(string)] = true
 	}
-	if !slugs["claude-code"] || !slugs["opencode"] {
-		t.Errorf("expected claude-code and opencode slugs, got %v", slugs)
+	if !slugs["claude-code"] || !slugs["opencode"] || !slugs["hermes"] {
+		t.Errorf("expected claude-code, opencode, and hermes slugs, got %v", slugs)
 	}
 }
 
@@ -150,8 +153,8 @@ func TestRunAllFlagIncludesEmptyTools(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatalf("output is not valid JSON: %v", err)
 	}
-	if len(out) != 9 {
-		t.Fatalf("got %d tools, want 9 (--all with a fully empty target)", len(out))
+	if len(out) != 10 {
+		t.Fatalf("got %d tools, want 10 (--all with a fully empty target)", len(out))
 	}
 }
 
@@ -165,7 +168,11 @@ func TestRunFullFlagDisablesTruncation(t *testing.T) {
 	if err := run([]string{dir}, &bufDefault); err != nil {
 		t.Fatalf("run error: %v", err)
 	}
-	if !strings.Contains(bufDefault.String(), "truncated") {
+	// Match the specific marker phrase, not the bare word "truncated" --
+	// Hermes's PrecedenceNote (always printed, regardless of --full)
+	// legitimately contains that word in unrelated prose describing its
+	// own per-file truncation behavior.
+	if !strings.Contains(bufDefault.String(), "truncated, use --full") {
 		t.Error("expected truncation marker without --full")
 	}
 
@@ -173,7 +180,7 @@ func TestRunFullFlagDisablesTruncation(t *testing.T) {
 	if err := run([]string{"--full", dir}, &bufFull); err != nil {
 		t.Fatalf("run error: %v", err)
 	}
-	if strings.Contains(bufFull.String(), "truncated") {
+	if strings.Contains(bufFull.String(), "truncated, use --full") {
 		t.Error("expected no truncation marker with --full")
 	}
 	if !strings.Contains(bufFull.String(), big) {
@@ -212,12 +219,13 @@ func TestRunCompileJSONModeProducesValidJSON(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatalf("output is not valid JSON: %v\nbody: %s", err, buf.String())
 	}
-	// A bare CLAUDE.md matches both claude-code (its native file) and
-	// opencode (documented CLAUDE.md compat fallback per internal/tools
-	// registry) -- confirmed empirically, not a bug. --all not given, so
-	// only these two non-empty tools should appear.
-	if len(out) != 2 {
-		t.Fatalf("got %d tools, want 2 (claude-code + opencode's documented CLAUDE.md compat fallback, --all not given)", len(out))
+	// A bare CLAUDE.md matches claude-code (its native file), opencode
+	// (documented CLAUDE.md compat fallback), and hermes (documented
+	// cwd-only CLAUDE.md compat fallback) per internal/tools registry --
+	// confirmed empirically, not a bug. --all not given, so only these
+	// three non-empty tools should appear.
+	if len(out) != 3 {
+		t.Fatalf("got %d tools, want 3 (claude-code + opencode + hermes's documented CLAUDE.md compat fallbacks, --all not given)", len(out))
 	}
 	for _, tool := range out {
 		if tool["mergeModel"] == nil || tool["mergeModel"] == "" {
@@ -333,7 +341,7 @@ func extractOverflowFilePath(t *testing.T, out string) string {
 	return ""
 }
 
-func TestRunLiveModeProducesNineReports(t *testing.T) {
+func TestRunLiveModeProducesReportForEveryTool(t *testing.T) {
 	isolateHome(t)
 	dir := t.TempDir()
 
@@ -345,8 +353,8 @@ func TestRunLiveModeProducesNineReports(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatalf("output is not valid JSON: %v\nbody: %s", err, buf.String())
 	}
-	if len(out) != 9 {
-		t.Fatalf("got %d reports, want 9 (--live always reports on every known tool)", len(out))
+	if len(out) != 10 {
+		t.Fatalf("got %d reports, want 10 (--live always reports on every known tool)", len(out))
 	}
 }
 
@@ -372,7 +380,7 @@ func TestRunLiveModeBypassesPathValidationForScanningButNotStatCheck(t *testing.
 	// (the os.Stat/IsDir check happens before the liveMode branch), but once
 	// past that, it does not call scan.Run at all -- confirmed indirectly by
 	// the fact that a directory with zero instruction files still produces a
-	// full 9-report --live output (rather than any scan-shaped output).
+	// full 10-report --live output (rather than any scan-shaped output).
 	isolateHome(t)
 	dir := t.TempDir()
 
@@ -421,6 +429,24 @@ func TestRunErrorsOnUnknownFlag(t *testing.T) {
 	err := run([]string{"--not-a-real-flag"}, &buf)
 	if err == nil {
 		t.Fatal("expected error for unknown flag, got nil")
+	}
+}
+
+func TestRunErrorsOnFlagAfterPath(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+
+	var buf bytes.Buffer
+	err := run([]string{dir, "--json"}, &buf)
+	if err == nil {
+		t.Fatal("expected error for a flag placed after the path argument, got nil")
+	}
+	if buf.Len() != 0 {
+		t.Errorf("expected no output written before the error, got: %s", buf.String())
+	}
+	var ue *usageError
+	if !errors.As(err, &ue) {
+		t.Errorf("expected a usageError (exit 2), got %T: %v", err, err)
 	}
 }
 
