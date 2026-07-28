@@ -43,12 +43,31 @@ type Chain struct {
 
 // BuildChain walks from target up to the filesystem root, recording every ancestor
 // directory and detecting the nearest .git boundary. See docs/design.md Step 1.
+//
+// Before walking, target is resolved to its physical form via filepath.EvalSymlinks
+// (all symlinks in the path, including symlinked ancestor directories, fully
+// resolved). This matches how a real coding-agent process resolves its cwd at
+// runtime -- e.g. Node's process.cwd() always returns the physical path, never a
+// symlinked/logical spelling -- so a target reached through a directory symlink
+// (say /Users/scott/projects/actx where /Users/scott/projects is a symlink to
+// /Volumes/qwiizlab/projects) walks the same physical ancestor chain
+// (/Volumes/qwiizlab/projects/actx, /Volumes/qwiizlab/projects, /Volumes, /) that
+// the real tool would consult, rather than the logical one the caller happened to
+// type. A broken/unresolvable symlink anywhere along the path surfaces here as an
+// error (from EvalSymlinks), which propagates up through Run's existing error
+// return rather than producing partial output.
 func BuildChain(target string) (Chain, error) {
 	abs, err := filepath.Abs(target)
 	if err != nil {
 		return Chain{}, err
 	}
 	abs = filepath.Clean(abs)
+
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return Chain{}, err
+	}
+	abs = filepath.Clean(resolved)
 
 	var reversed []string
 	cur := abs
@@ -160,6 +179,7 @@ func scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
 			break
 		}
 		dirHadMatch := false
+	localFilesLoop:
 		for _, lf := range t.LocalFiles {
 			matches := expandCandidate(filepath.Join(dir, lf.Pattern))
 			for _, m := range matches {
@@ -179,6 +199,17 @@ func scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
 					Note:    note,
 				})
 				dirHadMatch = true
+				// FirstMatchWins applies within a directory too: only the
+				// highest-priority LocalFiles pattern (earliest in the slice)
+				// that actually exists in this directory contributes, mirroring
+				// the outer ancestor-directory break below. Without this,
+				// tools like Hermes (.hermes.md > AGENTS.md > CLAUDE.md >
+				// .cursorrules) would have every coexisting candidate filename
+				// in the same directory matched instead of just the first one,
+				// contradicting their own documented PrecedenceNote.
+				if t.FirstMatchWins {
+					break localFilesLoop
+				}
 			}
 		}
 		if dirHadMatch {
@@ -203,7 +234,7 @@ func scanDownward(t tools.Tool, target string) []MatchedFile {
 	const maxDirsVisited = 500
 	skip := map[string]bool{
 		".git": true, "node_modules": true, "vendor": true, ".venv": true,
-		"dist": true, "build": true, ".cache": true,
+		"dist": true, "build": true, ".cache": true, "target": true,
 	}
 
 	var out []MatchedFile
@@ -216,6 +247,21 @@ func scanDownward(t tools.Tool, target string) []MatchedFile {
 		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
+			return
+		}
+		// Cache Directory Tagging Standard (https://bford.info/cachedir/): a
+		// directory containing a regular file literally named CACHEDIR.TAG
+		// directly inside it is a build/cache dir, same as the hardcoded skip
+		// names below -- don't count it as visited and don't descend into it.
+		// entries is already in hand from the ReadDir above (this is always the
+		// first thing walk() does for any directory it's about to process), so
+		// this reuses that read instead of doing an extra stat/lookup per
+		// candidate directory. Skipped-by-name directories are never opened at
+		// all by their parent (see the entries loop below), so they never reach
+		// this point or increment visited either; depth > 0 keeps target itself
+		// (which is scanned separately by scanTool's ancestor-chain loop, not
+		// subject to skip-by-name either) from being skipped this way.
+		if depth > 0 && hasCachedirTagEntry(entries) {
 			return
 		}
 		visited++
@@ -249,6 +295,20 @@ func scanDownward(t tools.Tool, target string) []MatchedFile {
 	walk(target, 0)
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
+}
+
+// hasCachedirTagEntry reports whether entries (as returned by os.ReadDir for
+// some directory) contains a regular file literally named CACHEDIR.TAG, per
+// the Cache Directory Tagging Standard (https://bford.info/cachedir/). A
+// directory or symlink named CACHEDIR.TAG does not count -- only a regular
+// file tags its containing directory as a cache directory.
+func hasCachedirTagEntry(entries []os.DirEntry) bool {
+	for _, e := range entries {
+		if e.Name() == "CACHEDIR.TAG" {
+			return e.Type().IsRegular()
+		}
+	}
+	return false
 }
 
 func readFile(path string) (string, bool) {

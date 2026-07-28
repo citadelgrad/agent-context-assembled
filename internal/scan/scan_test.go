@@ -1,9 +1,12 @@
 package scan
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/citadelgrad/actx/internal/tools"
 )
@@ -152,6 +155,197 @@ func TestBuildChainGitAsFile(t *testing.T) {
 	wantRepo = filepath.Clean(wantRepo)
 	if chain.Dirs[chain.GitRootIndex] != wantRepo {
 		t.Errorf("GitRootIndex points at %q, want %q", chain.Dirs[chain.GitRootIndex], wantRepo)
+	}
+}
+
+// ---- symlink resolution -----------------------------------------------------
+
+// TestBuildChainResolvesSymlinkedAncestorToPhysicalPath verifies BuildChain
+// resolves a target reached through a symlinked ancestor directory to its
+// physical path before walking, matching how a real coding-agent process
+// resolves its cwd at runtime (e.g. Node's process.cwd()). This is the direct
+// regression test for actx-87l: /Users/scott/projects/actx (logical, via a
+// symlinked "projects" dir) must model the same ancestor chain as
+// /Volumes/qwiizlab/projects/actx (physical).
+func TestBuildChainResolvesSymlinkedAncestorToPhysicalPath(t *testing.T) {
+	tmp := t.TempDir()
+	physicalRoot := filepath.Join(tmp, "physical")
+	physicalTarget := filepath.Join(physicalRoot, "projects", "actx")
+	mustMkdirAll(t, physicalTarget)
+
+	logicalRoot := filepath.Join(tmp, "logical")
+	mustMkdirAll(t, tmp)
+	if err := os.Symlink(filepath.Join(physicalRoot, "projects"), logicalRoot); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	logicalTarget := filepath.Join(logicalRoot, "actx")
+
+	physicalChain, err := BuildChain(physicalTarget)
+	if err != nil {
+		t.Fatalf("BuildChain(physical): %v", err)
+	}
+	logicalChain, err := BuildChain(logicalTarget)
+	if err != nil {
+		t.Fatalf("BuildChain(logical): %v", err)
+	}
+
+	if len(logicalChain.Dirs) != len(physicalChain.Dirs) {
+		t.Fatalf("logical chain has %d dirs, physical has %d; want identical chains: logical=%v physical=%v",
+			len(logicalChain.Dirs), len(physicalChain.Dirs), logicalChain.Dirs, physicalChain.Dirs)
+	}
+	for i := range physicalChain.Dirs {
+		if logicalChain.Dirs[i] != physicalChain.Dirs[i] {
+			t.Errorf("Dirs[%d]: logical=%q, physical=%q; want identical (physical) paths", i, logicalChain.Dirs[i], physicalChain.Dirs[i])
+		}
+	}
+	last := logicalChain.Dirs[len(logicalChain.Dirs)-1]
+	if last != physicalTarget {
+		t.Errorf("resolved target = %q, want physical path %q (no logical/symlink spelling)", last, physicalTarget)
+	}
+}
+
+// TestScanExcludesCLAUDEMdOnlyOnLogicalAncestry is the end-to-end regression
+// test for actx-87l: a CLAUDE.md placed only on the logical (symlink)
+// ancestry -- above the symlink itself, never reachable by walking the
+// physical tree -- must NOT appear in Claude Code's results when scanning via
+// the symlinked path, while a CLAUDE.md on the physical ancestry must still
+// appear. This models the exact bug report scenario: /Users/scott/projects is
+// a symlink to /Volumes/qwiizlab/projects, /Users/scott/CLAUDE.md exists (logical
+// ancestor only), and the physical workspace CLAUDE.md must still be included.
+func TestScanExcludesCLAUDEMdOnlyOnLogicalAncestry(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+
+	// Physical tree: /tmp/.../volumes/qwiizlab/projects/actx
+	volumes := filepath.Join(tmp, "volumes")
+	physicalWorkspace := filepath.Join(volumes, "qwiizlab", "projects")
+	physicalTarget := filepath.Join(physicalWorkspace, "actx")
+	mustMkdirAll(t, physicalTarget)
+	mustWriteFile(t, filepath.Join(physicalWorkspace, "CLAUDE.md"), "physical workspace instructions")
+
+	// Logical tree: /tmp/.../users/scott/CLAUDE.md (ancestor of the symlink,
+	// never reachable once "projects" resolves to the physical dir) and
+	// /tmp/.../users/scott/projects -> physical "qwiizlab/projects" symlink.
+	usersScott := filepath.Join(tmp, "users", "scott")
+	mustMkdirAll(t, usersScott)
+	mustWriteFile(t, filepath.Join(usersScott, "CLAUDE.md"), "logical-only ancestor instructions -- must be excluded")
+	logicalProjects := filepath.Join(usersScott, "projects")
+	if err := os.Symlink(physicalWorkspace, logicalProjects); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	logicalTarget := filepath.Join(logicalProjects, "actx")
+
+	results, _, err := Run(logicalTarget, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "claude-code")
+
+	if hasPath(r.Files, filepath.Join(usersScott, "CLAUDE.md")) {
+		t.Errorf("logical-only ancestor CLAUDE.md (%s) must be excluded once the symlinked target resolves to its physical path; got files: %+v", filepath.Join(usersScott, "CLAUDE.md"), r.Files)
+	}
+	if !hasPathWithContent(r.Files, filepath.Join(physicalWorkspace, "CLAUDE.md"), "physical workspace instructions") {
+		t.Errorf("expected physical workspace CLAUDE.md to be included; got files: %+v", r.Files)
+	}
+}
+
+// TestScanSymlinkedTargetIncludesGlobalAndPhysicalInOrder verifies AC3: with a
+// symlinked target, the global ~/.claude/CLAUDE.md and the physical
+// workspace/repo CLAUDE.md files are both still included, in correct
+// precedence order (global first, then ancestors root-to-target).
+func TestScanSymlinkedTargetIncludesGlobalAndPhysicalInOrder(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	mustWriteFile(t, filepath.Join(fakeHome, ".claude", "CLAUDE.md"), "global claude instructions")
+
+	tmp := t.TempDir()
+	physicalRepo := filepath.Join(tmp, "physicalrepo")
+	physicalTarget := filepath.Join(physicalRepo, "pkg")
+	mustMkdirAll(t, physicalTarget)
+	mustMkdirAll(t, filepath.Join(physicalRepo, ".git"))
+	mustWriteFile(t, filepath.Join(physicalRepo, "CLAUDE.md"), "physical repo instructions")
+
+	symlinkDir := filepath.Join(tmp, "alias")
+	if err := os.Symlink(physicalRepo, symlinkDir); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	logicalTarget := filepath.Join(symlinkDir, "pkg")
+
+	results, _, err := Run(logicalTarget, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "claude-code")
+
+	globalIdx := indexOfPath(r.Files, filepath.Join(fakeHome, ".claude", "CLAUDE.md"))
+	repoIdx := indexOfPath(r.Files, filepath.Join(physicalRepo, "CLAUDE.md"))
+	if globalIdx == -1 {
+		t.Fatalf("expected global CLAUDE.md to be included; got files: %+v", r.Files)
+	}
+	if repoIdx == -1 {
+		t.Fatalf("expected physical repo CLAUDE.md to be included; got files: %+v", r.Files)
+	}
+	if globalIdx > repoIdx {
+		t.Errorf("expected global CLAUDE.md (idx %d) before physical repo CLAUDE.md (idx %d)", globalIdx, repoIdx)
+	}
+}
+
+// TestBuildChainNonSymlinkTargetUnaffected verifies AC4 (no regression): a
+// target with no symlinks anywhere in its path resolves to exactly the same
+// chain as before (filepath.Abs + Clean), since EvalSymlinks on an
+// already-physical path is a no-op.
+func TestBuildChainNonSymlinkTargetUnaffected(t *testing.T) {
+	tmp := t.TempDir()
+	nested := filepath.Join(tmp, "a", "b", "c")
+	mustMkdirAll(t, nested)
+
+	chain, err := BuildChain(nested)
+	if err != nil {
+		t.Fatalf("BuildChain: %v", err)
+	}
+	last := chain.Dirs[len(chain.Dirs)-1]
+	wantTarget, _ := filepath.Abs(nested)
+	wantTarget = filepath.Clean(wantTarget)
+	if last != wantTarget {
+		t.Errorf("resolved target = %q, want %q (non-symlink target must be byte-for-byte unaffected)", last, wantTarget)
+	}
+}
+
+// TestBuildChainBrokenSymlinkReturnsError verifies AC5: a target that is (or
+// is reached through) a broken/unresolvable symlink returns an error from
+// BuildChain -- the same structured-error path Run/main already use for any
+// other unusable target -- instead of silently producing a partial chain.
+func TestBuildChainBrokenSymlinkReturnsError(t *testing.T) {
+	tmp := t.TempDir()
+	broken := filepath.Join(tmp, "broken-link")
+	if err := os.Symlink(filepath.Join(tmp, "does-not-exist"), broken); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	if _, err := BuildChain(broken); err == nil {
+		t.Fatal("BuildChain(broken symlink) = nil error, want an error")
+	}
+
+	// Same via the target-only Run entry point, so the error is confirmed to
+	// propagate out of the public API a caller (main.go) actually uses.
+	if _, _, err := Run(broken, Options{}); err == nil {
+		t.Fatal("Run(broken symlink) = nil error, want an error")
+	}
+}
+
+// TestBuildChainBrokenSymlinkedAncestorReturnsError covers the ancestor-only
+// variant of AC5: the target directory itself is real, but an ancestor
+// directory on its path is a broken symlink, so the full path cannot resolve.
+func TestBuildChainBrokenSymlinkedAncestorReturnsError(t *testing.T) {
+	tmp := t.TempDir()
+	broken := filepath.Join(tmp, "broken-link")
+	if err := os.Symlink(filepath.Join(tmp, "does-not-exist"), broken); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	target := filepath.Join(broken, "sub")
+
+	if _, err := BuildChain(target); err == nil {
+		t.Fatal("BuildChain(target under broken symlinked ancestor) = nil error, want an error")
 	}
 }
 
@@ -519,6 +713,202 @@ func TestScanDownwardEagerSkipsNoiseDirectories(t *testing.T) {
 	}
 }
 
+// TestScanDownwardEagerSkipsTargetDirectory verifies scanDownward skips a
+// directory literally named "target" (Rust/Cargo build output), the same way
+// it already skips .git, node_modules, and vendor (actx-7vc), while still
+// finding legitimate matches in sibling, non-skipped subdirectories.
+func TestScanDownwardEagerSkipsTargetDirectory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	mustMkdirAll(t, target)
+	mustWriteFile(t, filepath.Join(target, "target", "debug", "GEMINI.md"), "should be skipped")
+	mustWriteFile(t, filepath.Join(target, "keep", "GEMINI.md"), "should be found")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "gemini-cli")
+	if hasPath(r.Files, filepath.Join(target, "target", "debug", "GEMINI.md")) {
+		t.Error("should not descend into target/ (Rust/Cargo build output)")
+	}
+	if !hasPath(r.Files, filepath.Join(target, "keep", "GEMINI.md")) {
+		t.Error("should still find files in ordinary sibling subdirectories")
+	}
+}
+
+// TestScanDownwardEagerDoesNotSkipTargetsLookalikeWithoutTag verifies a
+// directory merely named similarly to "target" (e.g. "targets", plural) is
+// walked normally: the skip is an exact-name match, not a prefix match, and
+// there's no CACHEDIR.TAG here either.
+func TestScanDownwardEagerDoesNotSkipTargetsLookalikeWithoutTag(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	mustMkdirAll(t, target)
+	mustWriteFile(t, filepath.Join(target, "targets", "GEMINI.md"), "should be found: \"targets\" != \"target\"")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "gemini-cli")
+	if !hasPath(r.Files, filepath.Join(target, "targets", "GEMINI.md")) {
+		t.Errorf(`gemini-cli should still walk into "targets" (not exactly "target", no CACHEDIR.TAG); got files: %+v`, r.Files)
+	}
+}
+
+// TestScanDownwardEagerSkipsCachedirTaggedDirectory verifies scanDownward
+// generically skips any directory containing a CACHEDIR.TAG regular file
+// directly inside it (the Cache Directory Tagging Standard, actx-7vc),
+// covering build/cache dirs beyond the hardcoded name list -- while still
+// finding legitimate matches in sibling, non-skipped subdirectories.
+func TestScanDownwardEagerSkipsCachedirTaggedDirectory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	cacheDir := filepath.Join(target, "buildcache")
+	mustMkdirAll(t, cacheDir)
+	mustWriteFile(t, filepath.Join(cacheDir, "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n")
+	mustWriteFile(t, filepath.Join(cacheDir, "nested", "GEMINI.md"), "should be skipped")
+	mustWriteFile(t, filepath.Join(target, "keep", "GEMINI.md"), "should be found")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "gemini-cli")
+	if hasPath(r.Files, filepath.Join(cacheDir, "nested", "GEMINI.md")) {
+		t.Error("should not descend into a CACHEDIR.TAG-tagged directory")
+	}
+	if !hasPath(r.Files, filepath.Join(target, "keep", "GEMINI.md")) {
+		t.Error("should still find files in ordinary sibling subdirectories")
+	}
+}
+
+// TestScanDownwardEagerCachedirTagMustBeDirectChild verifies the CACHEDIR.TAG
+// check only fires when the tag file sits directly inside the candidate
+// directory (not an ancestor or descendant) -- a tag file one level deeper,
+// inside a grandchild rather than the child itself, must not cause the child
+// to be skipped.
+func TestScanDownwardEagerCachedirTagMustBeDirectChild(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	mustMkdirAll(t, target)
+	// CACHEDIR.TAG lives in outer/nested/, not directly in outer/ itself --
+	// outer/ must still be walked normally.
+	mustWriteFile(t, filepath.Join(target, "outer", "nested", "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n")
+	mustWriteFile(t, filepath.Join(target, "outer", "GEMINI.md"), "should be found: CACHEDIR.TAG is not directly in outer/")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "gemini-cli")
+	if !hasPath(r.Files, filepath.Join(target, "outer", "GEMINI.md")) {
+		t.Errorf("outer/ should be walked normally since CACHEDIR.TAG is not directly inside it; got files: %+v", r.Files)
+	}
+}
+
+// TestScanDownwardEagerCachedirTagMustBeRegularFile verifies a directory
+// literally named CACHEDIR.TAG does not tag its parent as a cache directory
+// -- only a regular file does, per the Cache Directory Tagging Standard.
+func TestScanDownwardEagerCachedirTagMustBeRegularFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	mustMkdirAll(t, target)
+	// CACHEDIR.TAG is a directory here, not a regular file -- must not trigger the skip.
+	mustWriteFile(t, filepath.Join(target, "weird", "CACHEDIR.TAG", "placeholder.txt"), "irrelevant")
+	mustWriteFile(t, filepath.Join(target, "weird", "GEMINI.md"), "should be found")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "gemini-cli")
+	if !hasPath(r.Files, filepath.Join(target, "weird", "GEMINI.md")) {
+		t.Errorf("weird/ should be walked normally since CACHEDIR.TAG there is a directory, not a regular file; got files: %+v", r.Files)
+	}
+}
+
+// TestScanDownwardEagerSkipsLargeTargetDirectoryFast is a regression test for
+// actx-7vc: pre-fix, scanDownward walked into Rust's target/ build directory
+// and only stopped after hitting its maxDirsVisited=500 cap, having opened
+// hundreds of subdirectories (one os.ReadDir syscall each) for zero matched
+// files. This builds a target/ directory with more than 500 subdirectories
+// directly inside it, each holding a "trap" GEMINI.md one level deeper that
+// must never be reached, and asserts the scan both returns quickly and never
+// descends past target/ itself.
+func TestScanDownwardEagerSkipsLargeTargetDirectoryFast(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	mustMkdirAll(t, target)
+
+	const numEntries = 600
+	for i := 0; i < numEntries; i++ {
+		mustWriteFile(t, filepath.Join(target, "target", fmt.Sprintf("artifact%d", i), "GEMINI.md"), "should never be reached")
+	}
+
+	start := time.Now()
+	results, _, err := Run(target, Options{})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("scanDownward took %s for a target/ dir with %d entries; expected it to skip target/ by name and return quickly", elapsed, numEntries)
+	}
+
+	r := findResult(t, results, "gemini-cli")
+	for i := 0; i < numEntries; i++ {
+		trap := filepath.Join(target, "target", fmt.Sprintf("artifact%d", i), "GEMINI.md")
+		if hasPath(r.Files, trap) {
+			t.Fatalf("scanDownward descended into target/artifact%d despite the target/ skip; found %s", i, trap)
+		}
+	}
+}
+
+// TestScanDownwardEagerSkipsLargeCachedirTaggedDirectoryFast is the
+// CACHEDIR.TAG counterpart of TestScanDownwardEagerSkipsLargeTargetDirectoryFast
+// (actx-7vc): a directory that isn't named "target" but is tagged with
+// CACHEDIR.TAG and contains more than 500 entries must still be skipped
+// quickly, without descending into any of them.
+func TestScanDownwardEagerSkipsLargeCachedirTaggedDirectoryFast(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "proj")
+	cacheDir := filepath.Join(target, "buildcache")
+	mustMkdirAll(t, cacheDir)
+	mustWriteFile(t, filepath.Join(cacheDir, "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n")
+
+	const numEntries = 600
+	for i := 0; i < numEntries; i++ {
+		mustWriteFile(t, filepath.Join(cacheDir, fmt.Sprintf("artifact%d", i), "GEMINI.md"), "should never be reached")
+	}
+
+	start := time.Now()
+	results, _, err := Run(target, Options{})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("scanDownward took %s for a CACHEDIR.TAG-tagged dir with %d entries; expected a fast skip", elapsed, numEntries)
+	}
+
+	r := findResult(t, results, "gemini-cli")
+	for i := 0; i < numEntries; i++ {
+		trap := filepath.Join(cacheDir, fmt.Sprintf("artifact%d", i), "GEMINI.md")
+		if hasPath(r.Files, trap) {
+			t.Fatalf("scanDownward descended into the CACHEDIR.TAG-tagged dir despite the tag; found %s", trap)
+		}
+	}
+}
+
 // TestScanOverrideFileWinsWithinSameDirectory verifies Codex CLI's
 // AGENTS.override.md is included alongside/instead-of AGENTS.md within the
 // same directory per its LocalFiles entries (scan.go itself just matches all
@@ -691,6 +1081,165 @@ func TestExpandCandidateDoublestarNoBaseDir(t *testing.T) {
 	got := expandCandidate(pattern)
 	if got != nil {
 		t.Errorf("expandCandidate on missing base dir = %v, want nil", got)
+	}
+}
+
+// ---- Hermes tool (real tools.Registry entry) end-to-end scan tests --------
+//
+// These tests drive the REAL "hermes" entry in tools.Registry (defined in
+// internal/tools/tools.go) through BuildChain/Run end-to-end, per actx-3l6,
+// rather than a synthetic fixture tool like the tests above. They pin down
+// Hermes's documented 5-filename local-file priority order
+// (.hermes.md/HERMES.md > AGENTS.md > CLAUDE.md > .cursorrules), its
+// ScopeTargetOnly scope (no ancestor walk), and its ~/.hermes/SOUL.md
+// GlobalConfig.
+
+// TestScanHermesHighestPriorityLocalFileWinsWhenMultiplePresent verifies
+// that when both .hermes.md and AGENTS.md exist in the target directory,
+// only .hermes.md (the higher-priority local file) is matched.
+func TestScanHermesHighestPriorityLocalFileWinsWhenMultiplePresent(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	target := t.TempDir()
+	mustWriteFile(t, filepath.Join(target, ".hermes.md"), "hermes-native content")
+	mustWriteFile(t, filepath.Join(target, "AGENTS.md"), "agents compat content")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "hermes")
+
+	if len(r.Files) != 1 {
+		t.Fatalf("got %d hermes files, want exactly 1 (first-match-wins within a directory): %+v", len(r.Files), r.Files)
+	}
+	want := filepath.Join(target, ".hermes.md")
+	if r.Files[0].Path != want {
+		t.Errorf("Files[0].Path = %q, want %q (.hermes.md is highest priority)", r.Files[0].Path, want)
+	}
+	if hasPath(r.Files, filepath.Join(target, "AGENTS.md")) {
+		t.Errorf("AGENTS.md should not be included once .hermes.md (higher priority) has matched; got files: %+v", r.Files)
+	}
+}
+
+// TestScanHermesPriorityOrderRespectedAcrossAllFilenames verifies that with
+// AGENTS.md, CLAUDE.md, and .cursorrules all present (but no .hermes.md or
+// HERMES.md), only AGENTS.md -- the highest-priority filename among those
+// present -- is matched.
+func TestScanHermesPriorityOrderRespectedAcrossAllFilenames(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	target := t.TempDir()
+	mustWriteFile(t, filepath.Join(target, "AGENTS.md"), "agents content")
+	mustWriteFile(t, filepath.Join(target, "CLAUDE.md"), "claude content")
+	mustWriteFile(t, filepath.Join(target, ".cursorrules"), "cursorrules content")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "hermes")
+
+	if len(r.Files) != 1 {
+		t.Fatalf("got %d hermes files, want exactly 1 (first-match-wins within a directory): %+v", len(r.Files), r.Files)
+	}
+	want := filepath.Join(target, "AGENTS.md")
+	if r.Files[0].Path != want {
+		t.Errorf("Files[0].Path = %q, want %q (AGENTS.md is highest priority among those present)", r.Files[0].Path, want)
+	}
+}
+
+// TestScanHermesLowestPriorityFileUsedWhenOnlyOnePresent verifies that
+// .cursorrules (the lowest-priority Hermes local file) is used when it is
+// the only Hermes candidate file present.
+func TestScanHermesLowestPriorityFileUsedWhenOnlyOnePresent(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	target := t.TempDir()
+	mustWriteFile(t, filepath.Join(target, ".cursorrules"), "cursorrules only content")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "hermes")
+	want := filepath.Join(target, ".cursorrules")
+	if !hasPathWithContent(r.Files, want, "cursorrules only content") {
+		t.Errorf("expected .cursorrules to be used when it's the only Hermes file present; got files: %+v", r.Files)
+	}
+	if len(r.Files) != 1 {
+		t.Errorf("expected exactly 1 hermes match, got %d: %+v", len(r.Files), r.Files)
+	}
+}
+
+// TestScanHermesScopeTargetOnlyIgnoresAncestors verifies Hermes's
+// ScopeTargetOnly scope never looks at an ancestor directory, even one
+// directly above the target with a matching HERMES.md file.
+func TestScanHermesScopeTargetOnlyIgnoresAncestors(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	tree := buildTestTree(t)
+	mustWriteFile(t, filepath.Join(tree.repo, "HERMES.md"), "repo-level, should be invisible to hermes")
+
+	results, _, err := Run(tree.pkg, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "hermes")
+	if hasPath(r.Files, filepath.Join(tree.repo, "HERMES.md")) {
+		t.Errorf("hermes (ScopeTargetOnly) should not see ancestor HERMES.md; got files: %+v", r.Files)
+	}
+	if len(r.Files) != 0 {
+		t.Errorf("expected zero hermes matches (no local target-dir file, no global config, empty fake home); got: %+v", r.Files)
+	}
+}
+
+// TestScanHermesGlobalSoulIncludedIndependentOfTargetContents verifies the
+// global ~/.hermes/SOUL.md GlobalConfig is included even when the target
+// directory has no local Hermes files at all.
+func TestScanHermesGlobalSoulIncludedIndependentOfTargetContents(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	mustWriteFile(t, filepath.Join(fakeHome, ".hermes", "SOUL.md"), "agent soul/personality")
+
+	target := t.TempDir()
+
+	results, chain, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if chain.Home != fakeHome {
+		t.Fatalf("chain.Home = %q, want %q", chain.Home, fakeHome)
+	}
+	r := findResult(t, results, "hermes")
+	want := filepath.Join(fakeHome, ".hermes", "SOUL.md")
+	if !hasPathWithContent(r.Files, want, "agent soul/personality") {
+		t.Errorf("expected global SOUL.md to be included even with no local target-dir files; got: %+v", r.Files)
+	}
+	idx := indexOfPath(r.Files, want)
+	if idx == -1 {
+		t.Fatalf("SOUL.md not found in files: %+v", r.Files)
+	}
+	if !strings.HasPrefix(r.Files[idx].Note, "global:") {
+		t.Errorf("Note = %q, want a %q-prefixed note for the global SOUL.md match", r.Files[idx].Note, "global:")
+	}
+}
+
+// TestScanHermesNoFilesAnywhereMeansNoMatchesNoError verifies that with
+// nothing on disk anywhere (no local files, no global config), the hermes
+// tool reports zero matches and Run does not error.
+func TestScanHermesNoFilesAnywhereMeansNoMatchesNoError(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	target := t.TempDir()
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "hermes")
+	if len(r.Files) != 0 {
+		t.Errorf("expected zero hermes matches with nothing on disk anywhere; got: %+v", r.Files)
 	}
 }
 
