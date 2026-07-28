@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -889,6 +890,165 @@ func TestExpandCandidateDoublestarNoBaseDir(t *testing.T) {
 	got := expandCandidate(pattern)
 	if got != nil {
 		t.Errorf("expandCandidate on missing base dir = %v, want nil", got)
+	}
+}
+
+// ---- Hermes tool (real tools.Registry entry) end-to-end scan tests --------
+//
+// These tests drive the REAL "hermes" entry in tools.Registry (defined in
+// internal/tools/tools.go) through BuildChain/Run end-to-end, per actx-3l6,
+// rather than a synthetic fixture tool like the tests above. They pin down
+// Hermes's documented 5-filename local-file priority order
+// (.hermes.md/HERMES.md > AGENTS.md > CLAUDE.md > .cursorrules), its
+// ScopeTargetOnly scope (no ancestor walk), and its ~/.hermes/SOUL.md
+// GlobalConfig.
+
+// TestScanHermesHighestPriorityLocalFileWinsWhenMultiplePresent verifies
+// that when both .hermes.md and AGENTS.md exist in the target directory,
+// only .hermes.md (the higher-priority local file) is matched.
+func TestScanHermesHighestPriorityLocalFileWinsWhenMultiplePresent(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	target := t.TempDir()
+	mustWriteFile(t, filepath.Join(target, ".hermes.md"), "hermes-native content")
+	mustWriteFile(t, filepath.Join(target, "AGENTS.md"), "agents compat content")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "hermes")
+
+	if len(r.Files) != 1 {
+		t.Fatalf("got %d hermes files, want exactly 1 (first-match-wins within a directory): %+v", len(r.Files), r.Files)
+	}
+	want := filepath.Join(target, ".hermes.md")
+	if r.Files[0].Path != want {
+		t.Errorf("Files[0].Path = %q, want %q (.hermes.md is highest priority)", r.Files[0].Path, want)
+	}
+	if hasPath(r.Files, filepath.Join(target, "AGENTS.md")) {
+		t.Errorf("AGENTS.md should not be included once .hermes.md (higher priority) has matched; got files: %+v", r.Files)
+	}
+}
+
+// TestScanHermesPriorityOrderRespectedAcrossAllFilenames verifies that with
+// AGENTS.md, CLAUDE.md, and .cursorrules all present (but no .hermes.md or
+// HERMES.md), only AGENTS.md -- the highest-priority filename among those
+// present -- is matched.
+func TestScanHermesPriorityOrderRespectedAcrossAllFilenames(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	target := t.TempDir()
+	mustWriteFile(t, filepath.Join(target, "AGENTS.md"), "agents content")
+	mustWriteFile(t, filepath.Join(target, "CLAUDE.md"), "claude content")
+	mustWriteFile(t, filepath.Join(target, ".cursorrules"), "cursorrules content")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "hermes")
+
+	if len(r.Files) != 1 {
+		t.Fatalf("got %d hermes files, want exactly 1 (first-match-wins within a directory): %+v", len(r.Files), r.Files)
+	}
+	want := filepath.Join(target, "AGENTS.md")
+	if r.Files[0].Path != want {
+		t.Errorf("Files[0].Path = %q, want %q (AGENTS.md is highest priority among those present)", r.Files[0].Path, want)
+	}
+}
+
+// TestScanHermesLowestPriorityFileUsedWhenOnlyOnePresent verifies that
+// .cursorrules (the lowest-priority Hermes local file) is used when it is
+// the only Hermes candidate file present.
+func TestScanHermesLowestPriorityFileUsedWhenOnlyOnePresent(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	target := t.TempDir()
+	mustWriteFile(t, filepath.Join(target, ".cursorrules"), "cursorrules only content")
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "hermes")
+	want := filepath.Join(target, ".cursorrules")
+	if !hasPathWithContent(r.Files, want, "cursorrules only content") {
+		t.Errorf("expected .cursorrules to be used when it's the only Hermes file present; got files: %+v", r.Files)
+	}
+	if len(r.Files) != 1 {
+		t.Errorf("expected exactly 1 hermes match, got %d: %+v", len(r.Files), r.Files)
+	}
+}
+
+// TestScanHermesScopeTargetOnlyIgnoresAncestors verifies Hermes's
+// ScopeTargetOnly scope never looks at an ancestor directory, even one
+// directly above the target with a matching HERMES.md file.
+func TestScanHermesScopeTargetOnlyIgnoresAncestors(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	tree := buildTestTree(t)
+	mustWriteFile(t, filepath.Join(tree.repo, "HERMES.md"), "repo-level, should be invisible to hermes")
+
+	results, _, err := Run(tree.pkg, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "hermes")
+	if hasPath(r.Files, filepath.Join(tree.repo, "HERMES.md")) {
+		t.Errorf("hermes (ScopeTargetOnly) should not see ancestor HERMES.md; got files: %+v", r.Files)
+	}
+	if len(r.Files) != 0 {
+		t.Errorf("expected zero hermes matches (no local target-dir file, no global config, empty fake home); got: %+v", r.Files)
+	}
+}
+
+// TestScanHermesGlobalSoulIncludedIndependentOfTargetContents verifies the
+// global ~/.hermes/SOUL.md GlobalConfig is included even when the target
+// directory has no local Hermes files at all.
+func TestScanHermesGlobalSoulIncludedIndependentOfTargetContents(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	mustWriteFile(t, filepath.Join(fakeHome, ".hermes", "SOUL.md"), "agent soul/personality")
+
+	target := t.TempDir()
+
+	results, chain, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if chain.Home != fakeHome {
+		t.Fatalf("chain.Home = %q, want %q", chain.Home, fakeHome)
+	}
+	r := findResult(t, results, "hermes")
+	want := filepath.Join(fakeHome, ".hermes", "SOUL.md")
+	if !hasPathWithContent(r.Files, want, "agent soul/personality") {
+		t.Errorf("expected global SOUL.md to be included even with no local target-dir files; got: %+v", r.Files)
+	}
+	idx := indexOfPath(r.Files, want)
+	if idx == -1 {
+		t.Fatalf("SOUL.md not found in files: %+v", r.Files)
+	}
+	if !strings.HasPrefix(r.Files[idx].Note, "global:") {
+		t.Errorf("Note = %q, want a %q-prefixed note for the global SOUL.md match", r.Files[idx].Note, "global:")
+	}
+}
+
+// TestScanHermesNoFilesAnywhereMeansNoMatchesNoError verifies that with
+// nothing on disk anywhere (no local files, no global config), the hermes
+// tool reports zero matches and Run does not error.
+func TestScanHermesNoFilesAnywhereMeansNoMatchesNoError(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	target := t.TempDir()
+
+	results, _, err := Run(target, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "hermes")
+	if len(r.Files) != 0 {
+		t.Errorf("expected zero hermes matches with nothing on disk anywhere; got: %+v", r.Files)
 	}
 }
 

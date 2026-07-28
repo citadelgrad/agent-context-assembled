@@ -1,6 +1,8 @@
 package compile_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -8,6 +10,18 @@ import (
 	"github.com/citadelgrad/actx/internal/scan"
 	"github.com/citadelgrad/actx/internal/tools"
 )
+
+// mustWriteFile is a small test helper wrapping os.WriteFile with a t.Fatal,
+// mirroring the identically-named helper in internal/scan/scan_test.go.
+func mustWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+}
 
 // toolBySlug looks up a tools.Registry entry by slug, failing the test if
 // absent -- keeps every test tied to the real registry rather than a
@@ -106,6 +120,46 @@ func TestMergeModelLabelsPerTool(t *testing.T) {
 				t.Errorf("MergeModel for %s fell through to the generic default fallback string; every registry slug should be explicitly cased in mergeModel()", tool.Slug)
 			}
 		})
+	}
+}
+
+// TestCompileHermesMergeModelReflectsRealScanFirstMatchWinsPrecedence
+// verifies that MergeModel's precedence description -- built from a REAL
+// scan.Result produced by actually scanning a directory containing both
+// .hermes.md and CLAUDE.md through the real "hermes" tools.Registry entry --
+// states that only the single highest-priority local file loads per session,
+// not both, per actx-3l6.
+func TestCompileHermesMergeModelReflectsRealScanFirstMatchWinsPrecedence(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	target := t.TempDir()
+	mustWriteFile(t, filepath.Join(target, ".hermes.md"), "hermes native content")
+	mustWriteFile(t, filepath.Join(target, "CLAUDE.md"), "claude compat content")
+
+	results, _, err := scan.Run(target, scan.Options{})
+	if err != nil {
+		t.Fatalf("scan.Run: %v", err)
+	}
+
+	out := compile.Run(results)
+	var tc compile.ToolCompile
+	found := false
+	for _, c := range out {
+		if c.Slug == "hermes" {
+			tc = c
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("no hermes ToolCompile found in compile.Run output")
+	}
+
+	if !strings.Contains(tc.MergeModel, "first-match-wins") {
+		t.Errorf("MergeModel = %q, want it to mention first-match-wins", tc.MergeModel)
+	}
+	if !strings.Contains(tc.MergeModel, "only one local file loads per session") {
+		t.Errorf("MergeModel = %q, want it to state only one local file loads per session", tc.MergeModel)
 	}
 }
 
