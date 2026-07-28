@@ -1,0 +1,33 @@
+foundry.yaml
+  s_7eff1a9e8acaf6::t_a6d5636e7c0c51 29
+  s_7eff1a9e8acaf6::t_07834f079710f2 1-26,28
+  s_7eff1a9e8acaf6::t_ae09a3a6e5a381 27
+.foundry/.gitignore
+  s_cbefd68c043fb7::t_a4308a02143c31 1-2
+.foundry/latest
+  s_cbefd68c043fb7::t_dd364980543e56 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "e8c1b8ae4f187b300e15b90a9338e21a273ee455",
+  "prompts": {},
+  "sessions": {
+    "s_7eff1a9e8acaf6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d30bb1c7-f69c-4c08-af1b-a55ce7bed030",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    },
+    "s_cbefd68c043fb7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bafcc7b6-250d-4a69-a7fd-88b759ec931f",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
