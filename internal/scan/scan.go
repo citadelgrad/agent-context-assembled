@@ -160,6 +160,7 @@ func scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
 			break
 		}
 		dirHadMatch := false
+	localFilesLoop:
 		for _, lf := range t.LocalFiles {
 			matches := expandCandidate(filepath.Join(dir, lf.Pattern))
 			for _, m := range matches {
@@ -179,6 +180,17 @@ func scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
 					Note:    note,
 				})
 				dirHadMatch = true
+				// FirstMatchWins applies within a directory too: only the
+				// highest-priority LocalFiles pattern (earliest in the slice)
+				// that actually exists in this directory contributes, mirroring
+				// the outer ancestor-directory break below. Without this,
+				// tools like Hermes (.hermes.md > AGENTS.md > CLAUDE.md >
+				// .cursorrules) would have every coexisting candidate filename
+				// in the same directory matched instead of just the first one,
+				// contradicting their own documented PrecedenceNote.
+				if t.FirstMatchWins {
+					break localFilesLoop
+				}
 			}
 		}
 		if dirHadMatch {

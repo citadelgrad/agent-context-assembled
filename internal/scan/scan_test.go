@@ -722,21 +722,7 @@ func TestScanHermesHighestPriorityLocalFileWinsWhenMultiplePresent(t *testing.T)
 	r := findResult(t, results, "hermes")
 
 	if len(r.Files) != 1 {
-		// KNOWN BUG (actx-3l6, not fixed here -- this is a test-only task):
-		// scanTool's FirstMatchWins handling only stops the OUTER loop across
-		// ancestor directories (`if t.FirstMatchWins && firstMatchFound { break }`
-		// in internal/scan/scan.go); the INNER loop over t.LocalFiles within a
-		// single directory has no analogous break, so every LocalFiles pattern
-		// that exists in that directory is matched and appended. For Hermes
-		// (ScopeTargetOnly -> exactly one directory ever scanned) this means
-		// .hermes.md and AGENTS.md are BOTH returned when both are present,
-		// contradicting the tool's own PrecedenceNote in internal/tools/tools.go
-		// ("Only one project-context filename is loaded per session ... first
-		// match wins"). This test encodes the documented/intended behavior; once
-		// scanTool is fixed to break out of the inner LocalFiles loop on first
-		// match too, this Skip will stop firing and the assertions below will
-		// start enforcing the fix automatically.
-		t.Skipf("KNOWN BUG (actx-3l6, not fixed by this test-only task): hermes scan matched %d files, want exactly 1 (%+v) -- see comment above this Skip in scan_test.go for details", len(r.Files), r.Files)
+		t.Fatalf("got %d hermes files, want exactly 1 (first-match-wins within a directory): %+v", len(r.Files), r.Files)
 	}
 	want := filepath.Join(target, ".hermes.md")
 	if r.Files[0].Path != want {
@@ -766,12 +752,7 @@ func TestScanHermesPriorityOrderRespectedAcrossAllFilenames(t *testing.T) {
 	r := findResult(t, results, "hermes")
 
 	if len(r.Files) != 1 {
-		// KNOWN BUG (actx-3l6, not fixed here): same root cause as
-		// TestScanHermesHighestPriorityLocalFileWinsWhenMultiplePresent above --
-		// scanTool's FirstMatchWins doesn't stop the inner per-directory
-		// LocalFiles loop, so AGENTS.md, CLAUDE.md, and .cursorrules are all
-		// matched instead of only the highest-priority AGENTS.md.
-		t.Skipf("KNOWN BUG (actx-3l6, not fixed by this test-only task): hermes scan matched %d files, want exactly 1 (%+v) -- see TestScanHermesHighestPriorityLocalFileWinsWhenMultiplePresent for details", len(r.Files), r.Files)
+		t.Fatalf("got %d hermes files, want exactly 1 (first-match-wins within a directory): %+v", len(r.Files), r.Files)
 	}
 	want := filepath.Join(target, "AGENTS.md")
 	if r.Files[0].Path != want {
