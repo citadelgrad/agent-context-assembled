@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/citadelgrad/actx/internal/scan"
 )
 
 // Tests in this file are written as package inspect (in-package, not
@@ -658,6 +660,61 @@ func TestClineReportEmptyTasksDirMeansDocumentedFlagNotRun(t *testing.T) {
 	r := clineReport(home)
 	if r.Mechanism != MechanismDocumentedFlagNotRun {
 		t.Errorf("Mechanism = %v, want %v (empty tasks dir should behave like absent)", r.Mechanism, MechanismDocumentedFlagNotRun)
+	}
+}
+
+// ---- hermesReport ----------------------------------------------------------
+
+// TestHermesReportRealScanPlusLiveSessionsMeansMetadataOnly verifies
+// hermesReport reports MechanismMetadataOnly with the session entry count,
+// using a fabricated but real ~/.hermes/sessions/ directory alongside a REAL
+// scan.Result produced by actually scanning a target directory that contains
+// .hermes.md, per actx-3l6.
+//
+// Note: hermesReport's own signature is `hermesReport(home string) Report`
+// -- it does not take a scan.Result parameter (or any "live mode" flag).
+// This is intentional per this package's doc comment above: inspect is
+// deliberately decoupled from scan/compile's filesystem-prediction, since
+// its job is introspecting real runtime artifacts instead. The scan.Result
+// is produced here purely to faithfully exercise the Gherkin scenario's
+// "given a real scan.Result produced by scanning a target directory
+// containing .hermes.md" clause; hermesReport itself is then called
+// directly with the isolated HOME, which is the actual "live mode" input it
+// accepts.
+func TestHermesReportRealScanPlusLiveSessionsMeansMetadataOnly(t *testing.T) {
+	fakeHome := t.TempDir()
+	target := t.TempDir()
+	mustWriteFile(t, filepath.Join(target, ".hermes.md"), "hermes native content")
+
+	// Produce a real scan.Result to fulfil the "given a real scan.Result
+	// produced by scanning a target directory containing .hermes.md" clause.
+	results, _, err := scan.Run(target, scan.Options{})
+	if err != nil {
+		t.Fatalf("scan.Run: %v", err)
+	}
+	var sawHermesMatch bool
+	for _, r := range results {
+		if r.Tool.Slug == "hermes" && len(r.Files) > 0 {
+			sawHermesMatch = true
+		}
+	}
+	if !sawHermesMatch {
+		t.Fatal("test setup invalid: real scan of target dir did not find the .hermes.md file for the hermes tool")
+	}
+
+	sessionsDir := filepath.Join(fakeHome, ".hermes", "sessions")
+	mustWriteFile(t, filepath.Join(sessionsDir, "session-1.jsonl"), `{"session":"one"}`)
+	mustWriteFile(t, filepath.Join(sessionsDir, "session-2.jsonl"), `{"session":"two"}`)
+
+	r := hermesReport(fakeHome)
+	if r.Mechanism != MechanismMetadataOnly {
+		t.Fatalf("Mechanism = %v, want %v", r.Mechanism, MechanismMetadataOnly)
+	}
+	if r.ArtifactCount != 2 {
+		t.Errorf("ArtifactCount = %d, want 2 (session entry count)", r.ArtifactCount)
+	}
+	if r.ArtifactPath != sessionsDir {
+		t.Errorf("ArtifactPath = %q, want %q", r.ArtifactPath, sessionsDir)
 	}
 }
 
