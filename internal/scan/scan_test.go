@@ -11,6 +11,22 @@ import (
 	"github.com/citadelgrad/actx/internal/tools"
 )
 
+// tempDir returns a fresh test temp directory resolved to its physical path
+// via filepath.EvalSymlinks. BuildChain always resolves its target the same
+// way (see scan.go), so tests that build "want" paths from this value line up
+// with the resolved paths BuildChain/Run actually produce -- notably on
+// macOS, where the default TMPDIR spells the OS temp dir through the /var ->
+// /private/var symlink.
+func tempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", dir, err)
+	}
+	return resolved
+}
+
 // mustMkdirAll is a small test helper wrapping os.MkdirAll with a t.Fatal.
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
@@ -35,7 +51,7 @@ func mustWriteFile(t *testing.T, path, content string) {
 // like a repo root -- this is the core documented behavior in
 // docs/design.md's Step 1.
 func TestBuildChainWalksToFilesystemRoot(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	nested := filepath.Join(tmp, "a", "b", "c")
 	mustMkdirAll(t, nested)
 
@@ -94,7 +110,7 @@ func TestBuildChainTargetIsFilesystemRoot(t *testing.T) {
 // target, not the one nearest the filesystem root (this matters for nested
 // repos / repos-within-repos scenarios).
 func TestBuildChainDetectsGitBoundaryNearestToTarget(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	outerRepo := filepath.Join(tmp, "outer")
 	innerRepo := filepath.Join(outerRepo, "inner")
 	target := filepath.Join(innerRepo, "sub")
@@ -121,7 +137,7 @@ func TestBuildChainDetectsGitBoundaryNearestToTarget(t *testing.T) {
 // TestBuildChainNoGitFound verifies GitRootIndex is -1 when no ancestor has a
 // .git entry.
 func TestBuildChainNoGitFound(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	nested := filepath.Join(tmp, "x", "y")
 	mustMkdirAll(t, nested)
 
@@ -138,7 +154,7 @@ func TestBuildChainNoGitFound(t *testing.T) {
 // case where ".git" is a file, not a directory, and should still be detected
 // as a boundary.
 func TestBuildChainGitAsFile(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	repo := filepath.Join(tmp, "repo")
 	target := filepath.Join(repo, "sub")
 	mustMkdirAll(t, target)
@@ -168,7 +184,7 @@ func TestBuildChainGitAsFile(t *testing.T) {
 // symlinked "projects" dir) must model the same ancestor chain as
 // /Volumes/qwiizlab/projects/actx (physical).
 func TestBuildChainResolvesSymlinkedAncestorToPhysicalPath(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	physicalRoot := filepath.Join(tmp, "physical")
 	physicalTarget := filepath.Join(physicalRoot, "projects", "actx")
 	mustMkdirAll(t, physicalTarget)
@@ -213,8 +229,8 @@ func TestBuildChainResolvesSymlinkedAncestorToPhysicalPath(t *testing.T) {
 // a symlink to /Volumes/qwiizlab/projects, /Users/scott/CLAUDE.md exists (logical
 // ancestor only), and the physical workspace CLAUDE.md must still be included.
 func TestScanExcludesCLAUDEMdOnlyOnLogicalAncestry(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 
 	// Physical tree: /tmp/.../volumes/qwiizlab/projects/actx
 	volumes := filepath.Join(tmp, "volumes")
@@ -254,11 +270,11 @@ func TestScanExcludesCLAUDEMdOnlyOnLogicalAncestry(t *testing.T) {
 // workspace/repo CLAUDE.md files are both still included, in correct
 // precedence order (global first, then ancestors root-to-target).
 func TestScanSymlinkedTargetIncludesGlobalAndPhysicalInOrder(t *testing.T) {
-	fakeHome := t.TempDir()
+	fakeHome := tempDir(t)
 	t.Setenv("HOME", fakeHome)
 	mustWriteFile(t, filepath.Join(fakeHome, ".claude", "CLAUDE.md"), "global claude instructions")
 
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	physicalRepo := filepath.Join(tmp, "physicalrepo")
 	physicalTarget := filepath.Join(physicalRepo, "pkg")
 	mustMkdirAll(t, physicalTarget)
@@ -295,7 +311,7 @@ func TestScanSymlinkedTargetIncludesGlobalAndPhysicalInOrder(t *testing.T) {
 // chain as before (filepath.Abs + Clean), since EvalSymlinks on an
 // already-physical path is a no-op.
 func TestBuildChainNonSymlinkTargetUnaffected(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	nested := filepath.Join(tmp, "a", "b", "c")
 	mustMkdirAll(t, nested)
 
@@ -316,7 +332,7 @@ func TestBuildChainNonSymlinkTargetUnaffected(t *testing.T) {
 // BuildChain -- the same structured-error path Run/main already use for any
 // other unusable target -- instead of silently producing a partial chain.
 func TestBuildChainBrokenSymlinkReturnsError(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	broken := filepath.Join(tmp, "broken-link")
 	if err := os.Symlink(filepath.Join(tmp, "does-not-exist"), broken); err != nil {
 		t.Fatalf("Symlink: %v", err)
@@ -337,7 +353,7 @@ func TestBuildChainBrokenSymlinkReturnsError(t *testing.T) {
 // variant of AC5: the target directory itself is real, but an ancestor
 // directory on its path is a broken symlink, so the full path cannot resolve.
 func TestBuildChainBrokenSymlinkedAncestorReturnsError(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	broken := filepath.Join(tmp, "broken-link")
 	if err := os.Symlink(filepath.Join(tmp, "does-not-exist"), broken); err != nil {
 		t.Fatalf("Symlink: %v", err)
@@ -365,7 +381,7 @@ type testTree struct {
 
 func buildTestTree(t *testing.T) testTree {
 	t.Helper()
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	root := tmp
 	org := filepath.Join(root, "org")
 	repo := filepath.Join(org, "repo")
@@ -379,7 +395,7 @@ func buildTestTree(t *testing.T) testTree {
 // tool (e.g. Claude Code) picks up an ancestor file ABOVE the detected .git
 // boundary, since such tools don't stop walking at the repo root.
 func TestScanFilesystemRootScopeSeesAboveGitRoot(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", tempDir(t))
 	tree := buildTestTree(t)
 	mustWriteFile(t, filepath.Join(tree.org, "CLAUDE.md"), "org-wide instructions")
 	mustWriteFile(t, filepath.Join(tree.repo, "CLAUDE.md"), "repo instructions")
@@ -402,7 +418,7 @@ func TestScanFilesystemRootScopeSeesAboveGitRoot(t *testing.T) {
 // CLI) does NOT pick up a file located above the detected .git boundary, even
 // though the ancestor chain itself extends further up.
 func TestScanGitRootScopeStopsAtGitRoot(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", tempDir(t))
 	tree := buildTestTree(t)
 	mustWriteFile(t, filepath.Join(tree.org, "AGENTS.md"), "should not be seen by codex-cli")
 	mustWriteFile(t, filepath.Join(tree.repo, "AGENTS.md"), "repo-root agents doc")
@@ -437,8 +453,8 @@ func TestScanGitRootScopeStopsAtGitRoot(t *testing.T) {
 // fallback: a ScopeGitRoot tool with NO .git anywhere in the chain only
 // checks the target directory itself.
 func TestScanGitRootScopeFallsBackToTargetOnlyWithNoGit(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	ancestor := filepath.Join(tmp, "a")
 	target := filepath.Join(ancestor, "b")
 	mustMkdirAll(t, target)
@@ -466,7 +482,7 @@ func TestScanGitRootScopeFallsBackToTargetOnlyWithNoGit(t *testing.T) {
 // (e.g. Cursor) never looks at any ancestor directory, even one directly
 // above the target with a matching file.
 func TestScanTargetOnlyScopeIgnoresAncestors(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", tempDir(t))
 	tree := buildTestTree(t)
 	mustWriteFile(t, filepath.Join(tree.repo, "AGENTS.md"), "repo-level, should be invisible to cursor")
 	mustWriteFile(t, filepath.Join(tree.pkg, "AGENTS.md"), "target-level, visible to cursor")
@@ -488,8 +504,8 @@ func TestScanTargetOnlyScopeIgnoresAncestors(t *testing.T) {
 // TestScanNoMatchesAnywhere verifies that with a fully empty tree, every tool
 // reports zero files, and Run does not error.
 func TestScanNoMatchesAnywhere(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "empty", "dir")
 	mustMkdirAll(t, target)
 
@@ -513,7 +529,7 @@ func TestScanNoMatchesAnywhere(t *testing.T) {
 // one (closest to target) contributes, per docs/design.md's "nearest project
 // file only" / docs/research.md's "First-match-wins per level".
 func TestScanFirstMatchWinsOnlyOneAncestorContributes(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", tempDir(t))
 	tree := buildTestTree(t)
 	mustWriteFile(t, filepath.Join(tree.repo, "AGENTS.md"), "repo-level (farther from target, nearer git root)")
 	mustWriteFile(t, filepath.Join(tree.pkg, "AGENTS.md"), "pkg-level (nearest to target)")
@@ -545,7 +561,7 @@ func TestScanFirstMatchWinsOnlyOneAncestorContributes(t *testing.T) {
 // nearest-to-target directory has no match, FirstMatchWins tools fall through
 // to the next ancestor that does.
 func TestScanFirstMatchWinsFallsThroughWhenNearestHasNoMatch(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", tempDir(t))
 	tree := buildTestTree(t)
 	// Only repo has a match; pkg (the target) does not.
 	mustWriteFile(t, filepath.Join(tree.repo, "AGENTS.md"), "repo-level only")
@@ -564,12 +580,12 @@ func TestScanFirstMatchWinsFallsThroughWhenNearestHasNoMatch(t *testing.T) {
 // config file is checked/included regardless of target-directory content,
 // using $HOME redirected to a temp dir for hermeticity.
 func TestScanGlobalConfigIncludedIndependentOfTarget(t *testing.T) {
-	fakeHome := t.TempDir()
+	fakeHome := tempDir(t)
 	t.Setenv("HOME", fakeHome)
 
 	mustWriteFile(t, filepath.Join(fakeHome, ".claude", "CLAUDE.md"), "global claude instructions")
 
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	mustMkdirAll(t, target)
 
@@ -594,10 +610,10 @@ func TestScanGlobalConfigIncludedIndependentOfTarget(t *testing.T) {
 // occurs when a fake HOME has no global config files at all -- important so
 // tests never accidentally read the real developer machine's dotfiles.
 func TestScanGlobalConfigAbsentWhenHomeUnset(t *testing.T) {
-	fakeHome := t.TempDir() // deliberately empty
+	fakeHome := tempDir(t) // deliberately empty
 	t.Setenv("HOME", fakeHome)
 
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	mustMkdirAll(t, target)
 
@@ -616,8 +632,8 @@ func TestScanGlobalConfigAbsentWhenHomeUnset(t *testing.T) {
 // TestScanDownwardEagerFindsSubdirectoryFiles verifies a DownwardEager tool
 // (e.g. Gemini CLI) picks up matching files in subdirectories below target.
 func TestScanDownwardEagerFindsSubdirectoryFiles(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	sub := filepath.Join(target, "pkg", "nested")
 	mustMkdirAll(t, sub)
@@ -638,8 +654,8 @@ func TestScanDownwardEagerFindsSubdirectoryFiles(t *testing.T) {
 // ancestor-chain loop in scanTool) isn't re-added a second time by
 // scanDownward's walk, which also visits target itself at depth 0.
 func TestScanDownwardEagerDoesNotDuplicateTargetDirOwnFile(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	mustMkdirAll(t, target)
 	mustWriteFile(t, filepath.Join(target, "GEMINI.md"), "gemini instructions in target dir")
@@ -664,8 +680,8 @@ func TestScanDownwardEagerDoesNotDuplicateTargetDirOwnFile(t *testing.T) {
 // TestScanDownwardNoneIgnoresSubdirectories verifies a DownwardNone tool
 // (e.g. Codex CLI) never looks below the target directory.
 func TestScanDownwardNoneIgnoresSubdirectories(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	sub := filepath.Join(target, "pkg")
 	mustMkdirAll(t, sub)
@@ -685,8 +701,8 @@ func TestScanDownwardNoneIgnoresSubdirectories(t *testing.T) {
 // common noise directories (.git, node_modules, vendor, etc.) rather than
 // descending into them.
 func TestScanDownwardEagerSkipsNoiseDirectories(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	mustMkdirAll(t, target)
 	mustWriteFile(t, filepath.Join(target, "node_modules", "somepkg", "GEMINI.md"), "should be skipped")
@@ -718,8 +734,8 @@ func TestScanDownwardEagerSkipsNoiseDirectories(t *testing.T) {
 // it already skips .git, node_modules, and vendor (actx-7vc), while still
 // finding legitimate matches in sibling, non-skipped subdirectories.
 func TestScanDownwardEagerSkipsTargetDirectory(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	mustMkdirAll(t, target)
 	mustWriteFile(t, filepath.Join(target, "target", "debug", "GEMINI.md"), "should be skipped")
@@ -743,8 +759,8 @@ func TestScanDownwardEagerSkipsTargetDirectory(t *testing.T) {
 // walked normally: the skip is an exact-name match, not a prefix match, and
 // there's no CACHEDIR.TAG here either.
 func TestScanDownwardEagerDoesNotSkipTargetsLookalikeWithoutTag(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	mustMkdirAll(t, target)
 	mustWriteFile(t, filepath.Join(target, "targets", "GEMINI.md"), "should be found: \"targets\" != \"target\"")
@@ -765,8 +781,8 @@ func TestScanDownwardEagerDoesNotSkipTargetsLookalikeWithoutTag(t *testing.T) {
 // covering build/cache dirs beyond the hardcoded name list -- while still
 // finding legitimate matches in sibling, non-skipped subdirectories.
 func TestScanDownwardEagerSkipsCachedirTaggedDirectory(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	cacheDir := filepath.Join(target, "buildcache")
 	mustMkdirAll(t, cacheDir)
@@ -793,8 +809,8 @@ func TestScanDownwardEagerSkipsCachedirTaggedDirectory(t *testing.T) {
 // inside a grandchild rather than the child itself, must not cause the child
 // to be skipped.
 func TestScanDownwardEagerCachedirTagMustBeDirectChild(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	mustMkdirAll(t, target)
 	// CACHEDIR.TAG lives in outer/nested/, not directly in outer/ itself --
@@ -816,8 +832,8 @@ func TestScanDownwardEagerCachedirTagMustBeDirectChild(t *testing.T) {
 // literally named CACHEDIR.TAG does not tag its parent as a cache directory
 // -- only a regular file does, per the Cache Directory Tagging Standard.
 func TestScanDownwardEagerCachedirTagMustBeRegularFile(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	mustMkdirAll(t, target)
 	// CACHEDIR.TAG is a directory here, not a regular file -- must not trigger the skip.
@@ -843,8 +859,8 @@ func TestScanDownwardEagerCachedirTagMustBeRegularFile(t *testing.T) {
 // must never be reached, and asserts the scan both returns quickly and never
 // descends past target/ itself.
 func TestScanDownwardEagerSkipsLargeTargetDirectoryFast(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	mustMkdirAll(t, target)
 
@@ -878,8 +894,8 @@ func TestScanDownwardEagerSkipsLargeTargetDirectoryFast(t *testing.T) {
 // CACHEDIR.TAG and contains more than 500 entries must still be skipped
 // quickly, without descending into any of them.
 func TestScanDownwardEagerSkipsLargeCachedirTaggedDirectoryFast(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	cacheDir := filepath.Join(target, "buildcache")
 	mustMkdirAll(t, cacheDir)
@@ -916,8 +932,8 @@ func TestScanDownwardEagerSkipsLargeCachedirTaggedDirectoryFast(t *testing.T) {
 // composition are compile.go's job, but scan must still find both files so
 // compile can apply that rule).
 func TestScanFindsBothOverrideAndBaseFileInSameDir(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	target := filepath.Join(tmp, "proj")
 	mustMkdirAll(t, target)
 	mustWriteFile(t, filepath.Join(target, "AGENTS.md"), "base")
@@ -940,8 +956,8 @@ func TestScanFindsBothOverrideAndBaseFileInSameDir(t *testing.T) {
 // one ToolResult per registered tool, matching registry order, regardless of
 // what's found on disk.
 func TestScanAllToolsAlwaysPresentInResults(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	results, _, err := Run(tmp, Options{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -961,8 +977,8 @@ func TestScanAllToolsAlwaysPresentInResults(t *testing.T) {
 // MatchedFile.Path and Chain.Dirs are documented/used as absolute paths
 // throughout render/compile).
 func TestScanRelativeTargetIsResolvedAbsolute(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	tmp := t.TempDir()
+	t.Setenv("HOME", tempDir(t))
+	tmp := tempDir(t)
 	sub := filepath.Join(tmp, "sub")
 	mustMkdirAll(t, sub)
 
@@ -988,7 +1004,7 @@ func TestScanRelativeTargetIsResolvedAbsolute(t *testing.T) {
 		t.Errorf("expected resolved target to be absolute, got %q", last)
 	}
 	// Compute the expected path via the POST-chdir working directory rather
-	// than the pre-chdir tmp variable: on macOS, t.TempDir() paths live under
+	// than the pre-chdir tmp variable: on macOS, tempDir(t) paths live under
 	// a /var symlink that resolves to /private/var once it becomes the
 	// actual process cwd, so filepath.Abs("sub") after chdir may legitimately
 	// differ textually from filepath.Join(tmp, "sub") computed beforehand.
@@ -1007,7 +1023,7 @@ func TestScanRelativeTargetIsResolvedAbsolute(t *testing.T) {
 // TestExpandCandidatePlainPath verifies a plain (non-glob) path is returned
 // only if it exists as a regular file.
 func TestExpandCandidatePlainPath(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	f := filepath.Join(tmp, "CLAUDE.md")
 	mustWriteFile(t, f, "hi")
 
@@ -1032,7 +1048,7 @@ func TestExpandCandidatePlainPath(t *testing.T) {
 // TestExpandCandidateSimpleGlob verifies a single-"*" glob (no doublestar)
 // expands via filepath.Glob and only returns regular files, sorted.
 func TestExpandCandidateSimpleGlob(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	mustWriteFile(t, filepath.Join(tmp, "rules", "b.md"), "b")
 	mustWriteFile(t, filepath.Join(tmp, "rules", "a.md"), "a")
 	mustMkdirAll(t, filepath.Join(tmp, "rules", "subdir")) // should not match *.md
@@ -1053,7 +1069,7 @@ func TestExpandCandidateSimpleGlob(t *testing.T) {
 // recurse through zero or more directories, matching Copilot's
 // ".github/instructions/**/*.instructions.md" convention.
 func TestExpandCandidateDoublestarRecursesSubdirectories(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	base := filepath.Join(tmp, ".github", "instructions")
 	mustWriteFile(t, filepath.Join(base, "top.instructions.md"), "top")
 	mustWriteFile(t, filepath.Join(base, "nested", "deep.instructions.md"), "deep")
@@ -1076,7 +1092,7 @@ func TestExpandCandidateDoublestarRecursesSubdirectories(t *testing.T) {
 // TestExpandCandidateDoublestarNoBaseDir verifies no panic and empty results
 // when the base directory (before "**") doesn't exist at all.
 func TestExpandCandidateDoublestarNoBaseDir(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := tempDir(t)
 	pattern := filepath.Join(tmp, "nonexistent", "**", "*.md")
 	got := expandCandidate(pattern)
 	if got != nil {
@@ -1098,9 +1114,9 @@ func TestExpandCandidateDoublestarNoBaseDir(t *testing.T) {
 // that when both .hermes.md and AGENTS.md exist in the target directory,
 // only .hermes.md (the higher-priority local file) is matched.
 func TestScanHermesHighestPriorityLocalFileWinsWhenMultiplePresent(t *testing.T) {
-	fakeHome := t.TempDir()
+	fakeHome := tempDir(t)
 	t.Setenv("HOME", fakeHome)
-	target := t.TempDir()
+	target := tempDir(t)
 	mustWriteFile(t, filepath.Join(target, ".hermes.md"), "hermes-native content")
 	mustWriteFile(t, filepath.Join(target, "AGENTS.md"), "agents compat content")
 
@@ -1127,9 +1143,9 @@ func TestScanHermesHighestPriorityLocalFileWinsWhenMultiplePresent(t *testing.T)
 // HERMES.md), only AGENTS.md -- the highest-priority filename among those
 // present -- is matched.
 func TestScanHermesPriorityOrderRespectedAcrossAllFilenames(t *testing.T) {
-	fakeHome := t.TempDir()
+	fakeHome := tempDir(t)
 	t.Setenv("HOME", fakeHome)
-	target := t.TempDir()
+	target := tempDir(t)
 	mustWriteFile(t, filepath.Join(target, "AGENTS.md"), "agents content")
 	mustWriteFile(t, filepath.Join(target, "CLAUDE.md"), "claude content")
 	mustWriteFile(t, filepath.Join(target, ".cursorrules"), "cursorrules content")
@@ -1153,9 +1169,9 @@ func TestScanHermesPriorityOrderRespectedAcrossAllFilenames(t *testing.T) {
 // .cursorrules (the lowest-priority Hermes local file) is used when it is
 // the only Hermes candidate file present.
 func TestScanHermesLowestPriorityFileUsedWhenOnlyOnePresent(t *testing.T) {
-	fakeHome := t.TempDir()
+	fakeHome := tempDir(t)
 	t.Setenv("HOME", fakeHome)
-	target := t.TempDir()
+	target := tempDir(t)
 	mustWriteFile(t, filepath.Join(target, ".cursorrules"), "cursorrules only content")
 
 	results, _, err := Run(target, Options{})
@@ -1176,7 +1192,7 @@ func TestScanHermesLowestPriorityFileUsedWhenOnlyOnePresent(t *testing.T) {
 // ScopeTargetOnly scope never looks at an ancestor directory, even one
 // directly above the target with a matching HERMES.md file.
 func TestScanHermesScopeTargetOnlyIgnoresAncestors(t *testing.T) {
-	fakeHome := t.TempDir()
+	fakeHome := tempDir(t)
 	t.Setenv("HOME", fakeHome)
 	tree := buildTestTree(t)
 	mustWriteFile(t, filepath.Join(tree.repo, "HERMES.md"), "repo-level, should be invisible to hermes")
@@ -1198,11 +1214,11 @@ func TestScanHermesScopeTargetOnlyIgnoresAncestors(t *testing.T) {
 // global ~/.hermes/SOUL.md GlobalConfig is included even when the target
 // directory has no local Hermes files at all.
 func TestScanHermesGlobalSoulIncludedIndependentOfTargetContents(t *testing.T) {
-	fakeHome := t.TempDir()
+	fakeHome := tempDir(t)
 	t.Setenv("HOME", fakeHome)
 	mustWriteFile(t, filepath.Join(fakeHome, ".hermes", "SOUL.md"), "agent soul/personality")
 
-	target := t.TempDir()
+	target := tempDir(t)
 
 	results, chain, err := Run(target, Options{})
 	if err != nil {
@@ -1229,9 +1245,9 @@ func TestScanHermesGlobalSoulIncludedIndependentOfTargetContents(t *testing.T) {
 // nothing on disk anywhere (no local files, no global config), the hermes
 // tool reports zero matches and Run does not error.
 func TestScanHermesNoFilesAnywhereMeansNoMatchesNoError(t *testing.T) {
-	fakeHome := t.TempDir()
+	fakeHome := tempDir(t)
 	t.Setenv("HOME", fakeHome)
-	target := t.TempDir()
+	target := tempDir(t)
 
 	results, _, err := Run(target, Options{})
 	if err != nil {
