@@ -386,6 +386,52 @@ Sources: [github.com/google-gemini/gemini-cli/blob/main/docs/cli/gemini-md.md](h
 
 ---
 
+## Hermes (NousResearch, github.com/NousResearch/hermes-agent)
+
+Sources: [hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/) (direct
+fetch), [hermes-agent.nousresearch.com/docs/user-guide/features/context-files](https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files),
+[hermes-agent.nousresearch.com/docs/user-guide/features/skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills),
+[hermes-agent.nousresearch.com/docs/user-guide/configuration](https://hermes-agent.nousresearch.com/docs/user-guide/configuration),
+[hermes-agent.nousresearch.com/docs/reference/cli-commands](https://hermes-agent.nousresearch.com/docs/reference/cli-commands).
+[github.com/NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) is linked from
+the official docs as the real upstream repo, but its internal source (file/function names) was not
+independently opened or verified for this entry.
+
+- **Filenames**: `.hermes.md`/`HERMES.md` (Hermes-native, highest priority), then compat auto-load
+  of `AGENTS.md`, `CLAUDE.md`, and `.cursorrules` (legacy Cursor-compat filename), in that priority
+  order. Docs state explicitly: "Only one project context type is loaded per session (first match
+  wins)."
+- **Discovery scope**: At startup, all filenames are discovered starting from cwd. Docs additionally
+  state that `AGENTS.md` and `CLAUDE.md` are rechecked in **up to 5 parent directories** during a
+  live session (via a component the docs call the "SubdirectoryHintTracker"), plus subdirectories
+  "progressively." `.cursorrules` is explicitly documented as **cwd only**, no ancestor walk.
+  `.hermes.md`/`HERMES.md`'s ancestor-walk behavior is not separately documented in the pages
+  checked. (Earlier notes in this doc claimed the reverse — that only `.hermes.md` walks up while
+  `AGENTS.md`/`CLAUDE.md`/`.cursorrules` are cwd-only — that claim did not hold up against the
+  official docs and has been corrected here.)
+- **Global config**: `~/.hermes/` — confirmed subpaths are `SOUL.md` (agent personality/identity
+  definition, injected into the system prompt) and `skills/`. Other subpaths some earlier drafts of
+  this doc listed (`config.yaml`, `.env`, `auth.json`, `memories/`, `cron/`) were not independently
+  confirmed and have been removed pending verification; `sessions/` and `logs/` are referenced only
+  indirectly, via the `hermes sessions` and `hermes logs` CLI commands.
+- **Merge/precedence**: First-match-wins — only one local project-context file loads per session —
+  concatenated with the global `SOUL.md`. Each loaded file is truncated **independently** (not a
+  shared budget) to `context_file_max_chars` (default 20,000 characters). Docs confirm head/tail
+  truncation applies but do not publish the exact split; the "scales with the configured model's
+  context window" claim in an earlier draft of this doc was not found in the docs and has been
+  removed.
+- **Skills mechanism**: Skills live at `~/.hermes/skills/` (confirmed: "the primary directory and
+  source of truth"). Loading is progressive disclosure: `skills_list()` returns a name/description
+  index (~3k tokens) at session start, and `skill_view(name)` fetches full content only when a skill
+  is actually used — not modeled by any tool in this registry (not even Claude Code's own
+  `.claude/skills/`), so treated as a separate, cross-tool feature rather than scanned here (see
+  `NonFileNotes` on the Hermes registry entry).
+- **Special conventions**: `hermes prompt-size` is a documented CLI command; per the docs it
+  "reports the fixed prompt budget for a fresh session — what gets sent on every API call before any
+  conversation content" — it does **not** print the resolved prompt/context content itself.
+
+---
+
 ## The cross-tool "AGENTS.md" spec
 
 Source: [agents.md](https://agents.md/) (direct fetch), [factory.ai/news/agents-md](https://factory.ai/news/agents-md),
@@ -518,6 +564,7 @@ were not further verifiable; no separate convention found or claimed beyond what
 | Cline | `.clinerules/`, `.clinerules` (legacy), `AGENTS.md` | Not documented | Not documented (monorepo nesting is an open request) | `~/Documents/Cline/Rules` | Additive; workspace overrides global on conflict |
 | Aider | none auto-loaded (`CONVENTIONS.md` by convention only) | N/A for instructions; config file uses fixed 3-point lookup | No | "home directory" (unspecified path) | Last-loaded-wins among 3 fixed config locations |
 | Gemini CLI | `GEMINI.md` (configurable name incl. `AGENTS.md`) | Yes, to `.git`/home | Yes, capped at 200 dirs | `~/.gemini/GEMINI.md` | Additive concat with provenance headers, general->specific |
+| Hermes | `.hermes.md`/`HERMES.md`, `AGENTS.md`, `CLAUDE.md`, `.cursorrules` | cwd at startup; AGENTS.md/CLAUDE.md also to 5 parent dirs live-session-only | Yes, "progressively" (AGENTS.md/CLAUDE.md) | `~/.hermes/SOUL.md` | First-match-wins (one file/session); each loaded file truncated independently to `context_file_max_chars` |
 
 ---
 
@@ -560,7 +607,7 @@ Each tool below is classified by one of four mechanisms:
   encoded path and reports it as metadata-only, pointing at `OTEL_LOG_RAW_API_BODIES` as the
   real mechanism.
 
-### Codex CLI — content-confirmed (strongest result of all 9 tools)
+### Codex CLI — content-confirmed (strongest result of all 10 tools)
 - Session rollouts live at `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl`,
   organized by **date**, not by project — each file must be opened and its embedded `cwd` field
   checked to scope it to a target directory.
@@ -657,6 +704,18 @@ Each tool below is classified by one of four mechanisms:
   the Linux VS Code path) and reports metadata-only if found (explicitly noting the confirmed
   absence of the system prompt), else documented-flag-not-run.
 
+### Hermes — documented-flag-not-run / metadata-only
+- `hermes prompt-size`
+  ([hermes-agent.nousresearch.com/docs/reference/cli-commands](https://hermes-agent.nousresearch.com/docs/reference/cli-commands))
+  is a real, documented CLI command. Per the official docs it "reports the fixed prompt budget for
+  a fresh session — what gets sent on every API call before any conversation content" — it does not
+  print the resolved system-prompt or context-file text as actually sent to the model.
+- `~/.hermes/sessions/` and `~/.hermes/logs/` are inferred, standard-layout paths, not directly
+  confirmed in the fetched docs pages; only existence/count is reported, not parsed content.
+- Implemented: `--live` checks for entries under `~/.hermes/sessions/` and reports count/newest
+  mtime as metadata-only if present, else documented-flag-not-run (describing `hermes prompt-size`
+  as the fixed-prompt-budget mechanism).
+
 ### Summary table
 
 | Tool | Mechanism | Real artifact? | Contains verbatim system prompt? |
@@ -670,4 +729,5 @@ Each tool below is classified by one of four mechanisms:
 | Cursor | metadata-only / none | Maybe (`state.vscdb`) | Unconfirmed — schema undocumented |
 | Windsurf | documented-flag-not-run / metadata-only | Conditional (opt-in hook) | Unconfirmed |
 | Cline | documented-flag-not-run / metadata-only | Yes (task history) | **No** — officially confirmed excluded |
+| Hermes | documented-flag-not-run / metadata-only | Conditional (`~/.hermes/sessions/`, unconfirmed path) | No — `prompt-size` reports the fixed prompt budget only, not content |
 

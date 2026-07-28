@@ -93,6 +93,7 @@ func Run(targetDir string) []Report {
 		cursorReport(home),
 		windsurfReport(home),
 		clineReport(home),
+		hermesReport(home),
 	}
 }
 
@@ -609,6 +610,38 @@ func clineReport(home string) Report {
 			base.LastModified = newest
 			base.Summary = fmt.Sprintf("Found %d Cline task folder(s) at %s; api_conversation_history.json confirmed by Cline's own docs to exclude the system prompt.", len(entries), dir)
 			break
+		}
+	}
+	return base
+}
+
+func hermesReport(home string) Report {
+	base := Report{
+		Tool:      "Hermes Agent",
+		Slug:      "hermes",
+		Mechanism: MechanismDocumentedFlagNotRun,
+		Summary:   "Hermes has a documented `hermes prompt-size` command, but it reports the prompt's fixed byte budget, not its resolved content.",
+		Detail: "CONFIRMED (hermes-agent.nousresearch.com/docs/reference/cli-commands): `hermes prompt-size` \"reports the fixed prompt budget for a fresh " +
+			"session -- what gets sent on every API call before any conversation content\" -- it does not print the actual resolved system-prompt or " +
+			"context-file text as sent to the model. The docs also list `hermes sessions` (browse/export/prune) and `hermes logs` (view/tail/filter) " +
+			"commands, implying on-disk session and log storage under the Hermes home directory, but the exact path and content format are not " +
+			"source-verified here, so this prototype only checks the inferred ~/.hermes/sessions/ path and reports existence/count, not parsed content.",
+		Confidence: "confirmed via official docs for the CLI command; ~/.hermes/sessions/ path and content format are an inferred, not source-verified, convention",
+	}
+	if home != "" {
+		dir := filepath.Join(home, ".hermes", "sessions")
+		if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
+			var newest time.Time
+			for _, e := range entries {
+				if info, err := e.Info(); err == nil && info.ModTime().After(newest) {
+					newest = info.ModTime()
+				}
+			}
+			base.Mechanism = MechanismMetadataOnly
+			base.ArtifactPath = dir
+			base.ArtifactCount = len(entries)
+			base.LastModified = newest
+			base.Summary = fmt.Sprintf("Found %d Hermes session file(s)/folder(s) at %s; content format not source-verified, so only existence/count is reported.", len(entries), dir)
 		}
 	}
 	return base

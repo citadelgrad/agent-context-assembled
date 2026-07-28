@@ -75,8 +75,8 @@ func TestCompileAiderIsNAWithNoFiles(t *testing.T) {
 
 // TestMergeModelLabelsPerTool spot-checks that every tool gets a
 // slug-specific (not the generic default fallback) merge-model description,
-// and that the fallback branch is unreachable given all 9 registry slugs are
-// explicitly cased.
+// and that the fallback branch is unreachable given all 10 registry slugs
+// are explicitly cased.
 func TestMergeModelLabelsPerTool(t *testing.T) {
 	wantSubstr := map[string]string{
 		"claude-code":    "additive concatenation",
@@ -88,6 +88,7 @@ func TestMergeModelLabelsPerTool(t *testing.T) {
 		"cline":          "additive concatenation",
 		"gemini-cli":     "additive concatenation",
 		"aider":          "N/A",
+		"hermes":         "first-match-wins",
 	}
 	for _, tool := range tools.Registry {
 		t.Run(tool.Slug, func(t *testing.T) {
@@ -425,10 +426,11 @@ func TestCompileWindsurfNoTriggerFrontmatterMeansNoCondition(t *testing.T) {
 // ---- LimitChecks: only codex-cli and windsurf ----------------------------
 
 // TestLimitChecksOnlyForCodexAndWindsurf verifies every other tool gets a nil
-// (not empty-but-non-nil) LimitChecks slice.
+// (not empty-but-non-nil) LimitChecks slice. Hermes also documents a hard
+// per-file limit (context_file_max_chars), so it's excluded here too.
 func TestLimitChecksOnlyForCodexAndWindsurf(t *testing.T) {
 	for _, tool := range tools.Registry {
-		if tool.Slug == "codex-cli" || tool.Slug == "windsurf" {
+		if tool.Slug == "codex-cli" || tool.Slug == "windsurf" || tool.Slug == "hermes" {
 			continue
 		}
 		t.Run(tool.Slug, func(t *testing.T) {

@@ -73,11 +73,11 @@ func TestRegistryNonEmpty(t *testing.T) {
 	if len(Registry) == 0 {
 		t.Fatal("Registry is empty")
 	}
-	// The project documents exactly 9 surveyed tools (see docs/research.md);
+	// The project documents exactly 10 surveyed tools (see docs/research.md);
 	// pin the count so an accidental deletion/duplication is caught.
-	const wantCount = 9
+	const wantCount = 10
 	if len(Registry) != wantCount {
-		t.Errorf("Registry has %d tools, want %d (per docs/research.md's 9 surveyed tools)", len(Registry), wantCount)
+		t.Errorf("Registry has %d tools, want %d (per docs/research.md's 10 surveyed tools)", len(Registry), wantCount)
 	}
 }
 
@@ -123,6 +123,7 @@ func TestKnownToolsPresent(t *testing.T) {
 		"cline",
 		"gemini-cli",
 		"aider",
+		"hermes",
 	}
 	bySlug := map[string]Tool{}
 	for _, tool := range Registry {

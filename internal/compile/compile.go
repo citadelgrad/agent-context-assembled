@@ -175,6 +175,8 @@ func mergeModel(t tools.Tool) string {
 		return "additive concatenation with provenance headers (global -> ancestors -> subdirectories below target), general-to-specific"
 	case "aider":
 		return "N/A: Aider auto-loads no instruction file; the config file shown here is not injected as agent instructions"
+	case "hermes":
+		return "first-match-wins: only one local file loads per session (.hermes.md/HERMES.md > AGENTS.md > CLAUDE.md > .cursorrules), concatenated with the global SOUL.md into the system prompt; each loaded file truncated independently to context_file_max_chars, not a shared budget"
 	default:
 		return "additive concatenation"
 	}
@@ -280,6 +282,8 @@ func limitChecks(r scan.ToolResult) []LimitCheck {
 		return []LimitCheck{codexLimitCheck(r)}
 	case "windsurf":
 		return windsurfLimitChecks(r)
+	case "hermes":
+		return hermesLimitChecks(r)
 	default:
 		return nil
 	}
@@ -352,6 +356,31 @@ func windsurfLimitChecks(r scan.ToolResult) []LimitCheck {
 				Confidence:  "3-of-4 secondary sources agree (no primary source available post-rebrand)",
 			})
 		}
+	}
+	return checks
+}
+
+// hermesContextFileMaxChars is Hermes's documented default context_file_max_chars
+// (hermes-agent.nousresearch.com/docs/user-guide/configuration), applied
+// independently (not a shared budget) to every file it names: SOUL.md,
+// .hermes.md, AGENTS.md, CLAUDE.md, and .cursorrules. Docs confirm head/tail
+// truncation applies but do not publish the exact split, so this check only
+// tests against the documented default byte count.
+const hermesContextFileMaxChars = 20000
+
+func hermesLimitChecks(r scan.ToolResult) []LimitCheck {
+	var checks []LimitCheck
+	for _, f := range r.Files {
+		measured := len(f.Content)
+		checks = append(checks, LimitCheck{
+			Documented:  true,
+			Description: fmt.Sprintf("Hermes context_file_max_chars default, applied independently per file (%s)", f.Path),
+			LimitValue:  hermesContextFileMaxChars,
+			Unit:        "characters",
+			Measured:    measured,
+			Exceeds:     measured > hermesContextFileMaxChars,
+			Confidence:  "confirmed via official docs (user-guide/configuration); exact head/tail truncation split not published",
+		})
 	}
 	return checks
 }

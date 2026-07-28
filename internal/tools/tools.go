@@ -239,4 +239,27 @@ var Registry = []Tool{
 			"Instruction content (e.g. CONVENTIONS.md) is never auto-discovered by Aider; it must be named explicitly via --read or a read: key in .aider.conf.yml, so this prototype cannot enumerate it generically.",
 		},
 	},
+	{
+		Name: "Hermes Agent",
+		Slug: "hermes",
+		LocalFiles: []LocalFile{
+			{Pattern: ".hermes.md", Note: "Hermes-native project file, highest priority"},
+			{Pattern: "HERMES.md", Note: "Hermes-native project file, same priority as .hermes.md"},
+			{Pattern: "AGENTS.md", Note: "compat fallback; docs also describe a live-session ancestor walk (up to 5 parent dirs) this static scan does not perform -- see NonFileNotes"},
+			{Pattern: "CLAUDE.md", Note: "compat fallback; docs also describe a live-session ancestor walk (up to 5 parent dirs) this static scan does not perform -- see NonFileNotes"},
+			{Pattern: ".cursorrules", Note: "compat fallback; documented as cwd-only, no ancestor walk"},
+		},
+		Scope:          ScopeTargetOnly,
+		Downward:       DownwardLazy,
+		FirstMatchWins: true,
+		GlobalConfigs: []GlobalConfig{
+			{PathFromHome: ".hermes/SOUL.md", Note: "agent personality/identity definition, injected into the system prompt"},
+		},
+		PrecedenceNote: "Only one project-context filename is loaded per session, in priority order .hermes.md/HERMES.md > AGENTS.md > CLAUDE.md > .cursorrules (first match wins), plus the global SOUL.md. Each loaded file is truncated independently (not a shared budget) to context_file_max_chars (default 20,000 characters; docs confirm head/tail truncation but not the exact split). At startup all five filenames are discovered from cwd; docs additionally describe AGENTS.md/CLAUDE.md being rechecked in up to 5 parent directories during a live session, which this static single-target scan does not perform -- see NonFileNotes.",
+		NonFileNotes: []string{
+			"Per official docs (hermes-agent.nousresearch.com/docs/user-guide/features/context-files), AGENTS.md and CLAUDE.md are additionally rechecked in up to 5 parent directories during a live session (via a component the docs call the SubdirectoryHintTracker); .cursorrules is explicitly documented as cwd-only, and .hermes.md/HERMES.md's ancestor behavior is not separately documented. This prototype only scans the target directory (Scope=ScopeTargetOnly) and has no ScopeMode for a bounded, session-driven ancestor walk -- ScopeGitRoot/ScopeFilesystemRoot would overstate how far Hermes actually looks from a fresh cwd.",
+			"Skills live at ~/.hermes/skills/ and use progressive disclosure: a name+description index (~3k tokens) is injected into the system prompt at session start, with full SKILL.md content fetched on demand only when a skill is actually used. Not modeled by this prototype -- no tool in this registry scans on-demand skill directories (not even Claude Code's own .claude/skills/), so this is a separate, cross-tool feature request rather than a Hermes-only gap.",
+			"`hermes prompt-size` (hermes-agent.nousresearch.com/docs/reference/cli-commands) reports the fixed prompt budget for a fresh session -- what gets sent on every API call before any conversation content -- but does not print the resolved instruction-file/context text itself.",
+		},
+	},
 }

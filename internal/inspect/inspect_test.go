@@ -663,25 +663,25 @@ func TestClineReportEmptyTasksDirMeansDocumentedFlagNotRun(t *testing.T) {
 
 // ---- Run() ---------------------------------------------------------------
 
-// TestRunReturnsExactlyNineReportsHermetically fabricates a fully isolated
+// TestRunReturnsExactlyTenReportsHermetically fabricates a fully isolated
 // $HOME so that Run() (which internally calls os.UserHomeDir()) never
 // touches the real developer machine's actual ~/.claude, ~/.codex, etc.
 // directories. It only asserts structural invariants (count, non-empty
 // fields, slug set) -- never anything about what's really on this machine.
-func TestRunReturnsExactlyNineReportsHermetically(t *testing.T) {
+func TestRunReturnsExactlyTenReportsHermetically(t *testing.T) {
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
 
 	target := t.TempDir()
 	reports := Run(target)
 
-	if len(reports) != 9 {
-		t.Fatalf("Run returned %d reports, want 9", len(reports))
+	if len(reports) != 10 {
+		t.Fatalf("Run returned %d reports, want 10", len(reports))
 	}
 
 	wantSlugs := []string{
 		"claude-code", "codex-cli", "opencode", "aider", "gemini-cli",
-		"github-copilot", "cursor", "windsurf", "cline",
+		"github-copilot", "cursor", "windsurf", "cline", "hermes",
 	}
 	gotSlugs := make([]string, len(reports))
 	for i, r := range reports {
