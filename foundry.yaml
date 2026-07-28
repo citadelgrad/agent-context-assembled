@@ -1,0 +1,29 @@
+version: 1
+
+profiles:
+  triage:
+    parallel: false
+    gates:
+      - id: build
+        run: go build -v ./...
+        timeout: 5m
+      - id: vet
+        run: go vet ./...
+        timeout: 5m
+      - id: gofmt
+        run: |
+          fmt_out="$(gofmt -l .)"
+          if [ -n "$fmt_out" ]; then
+            echo "The following files are not gofmt'd:"
+            echo "$fmt_out"
+            exit 1
+          fi
+        timeout: 2m
+      - id: test
+        run: go test -race ./...
+        timeout: 10m
+
+schedules:
+  triage-actx:
+    profile: triage
+    cron: '0 5 * * 2'
