@@ -1,0 +1,47 @@
+internal/inspect/inspect_test.go
+  s_035bb98beaa248::t_3f23d7abd8f12e 666,671,678-679,684
+internal/compile/compile_test.go
+  s_035bb98beaa248::t_ef4ecd6d0a61a0 91
+  s_035bb98beaa248::t_6ea0a66b2157cc 78-79
+  s_035bb98beaa248::t_9f34ba09c8feee 429-430,433
+docs/research.md
+  s_035bb98beaa248::t_7ca9fa059795b3 732
+  s_035bb98beaa248::t_93a3cfdead7e61 707,715-716,718
+  s_035bb98beaa248::t_b13b1fed45f46b 708-714,717
+  s_035bb98beaa248::t_a8c651fcda3f81 391-394,396-398,400-431
+  s_035bb98beaa248::t_5c91e11178b975 389-390,395,399,432-434
+  s_035bb98beaa248::t_6d264b168fcdc7 567
+  s_035bb98beaa248::t_641c5a725bbc8f 610
+internal/compile/compile.go
+  s_035bb98beaa248::t_d22b2d29d18e22 178
+  s_035bb98beaa248::t_dc4149bb8c7737 285-286
+  s_035bb98beaa248::t_0eeec1b6b7ae71 363-368,377,382
+  s_035bb98beaa248::t_738d4a241bd974 179
+  s_035bb98beaa248::t_324500d9010b80 362,369-376,378-381,383-386
+internal/inspect/inspect.go
+  s_035bb98beaa248::t_d5c59596125ee2 96
+  s_035bb98beaa248::t_e247a3ed97ec77 617-622,630-648
+  s_035bb98beaa248::t_052be6d7d2e3b4 623-629
+internal/tools/tools_test.go
+  s_035bb98beaa248::t_a8590c6f425385 76,78,80
+  s_035bb98beaa248::t_11b0df7ffec0dc 126
+internal/tools/tools.go
+  s_035bb98beaa248::t_29df56ea68aabe 246-250,252-254,256,258,260-262
+  s_035bb98beaa248::t_4c2c814d24a39a 242-245,251,255,257,259,263-264
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "8c3b3ad10b855913b418e4e9a77a2c5c1489fb37",
+  "prompts": {},
+  "sessions": {
+    "s_035bb98beaa248": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1ec9f2cf-dc09-49fe-88c6-30c07c044120",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
