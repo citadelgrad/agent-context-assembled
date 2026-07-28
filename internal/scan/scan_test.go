@@ -155,6 +155,197 @@ func TestBuildChainGitAsFile(t *testing.T) {
 	}
 }
 
+// ---- symlink resolution -----------------------------------------------------
+
+// TestBuildChainResolvesSymlinkedAncestorToPhysicalPath verifies BuildChain
+// resolves a target reached through a symlinked ancestor directory to its
+// physical path before walking, matching how a real coding-agent process
+// resolves its cwd at runtime (e.g. Node's process.cwd()). This is the direct
+// regression test for actx-87l: /Users/scott/projects/actx (logical, via a
+// symlinked "projects" dir) must model the same ancestor chain as
+// /Volumes/qwiizlab/projects/actx (physical).
+func TestBuildChainResolvesSymlinkedAncestorToPhysicalPath(t *testing.T) {
+	tmp := t.TempDir()
+	physicalRoot := filepath.Join(tmp, "physical")
+	physicalTarget := filepath.Join(physicalRoot, "projects", "actx")
+	mustMkdirAll(t, physicalTarget)
+
+	logicalRoot := filepath.Join(tmp, "logical")
+	mustMkdirAll(t, tmp)
+	if err := os.Symlink(filepath.Join(physicalRoot, "projects"), logicalRoot); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	logicalTarget := filepath.Join(logicalRoot, "actx")
+
+	physicalChain, err := BuildChain(physicalTarget)
+	if err != nil {
+		t.Fatalf("BuildChain(physical): %v", err)
+	}
+	logicalChain, err := BuildChain(logicalTarget)
+	if err != nil {
+		t.Fatalf("BuildChain(logical): %v", err)
+	}
+
+	if len(logicalChain.Dirs) != len(physicalChain.Dirs) {
+		t.Fatalf("logical chain has %d dirs, physical has %d; want identical chains: logical=%v physical=%v",
+			len(logicalChain.Dirs), len(physicalChain.Dirs), logicalChain.Dirs, physicalChain.Dirs)
+	}
+	for i := range physicalChain.Dirs {
+		if logicalChain.Dirs[i] != physicalChain.Dirs[i] {
+			t.Errorf("Dirs[%d]: logical=%q, physical=%q; want identical (physical) paths", i, logicalChain.Dirs[i], physicalChain.Dirs[i])
+		}
+	}
+	last := logicalChain.Dirs[len(logicalChain.Dirs)-1]
+	if last != physicalTarget {
+		t.Errorf("resolved target = %q, want physical path %q (no logical/symlink spelling)", last, physicalTarget)
+	}
+}
+
+// TestScanExcludesCLAUDEMdOnlyOnLogicalAncestry is the end-to-end regression
+// test for actx-87l: a CLAUDE.md placed only on the logical (symlink)
+// ancestry -- above the symlink itself, never reachable by walking the
+// physical tree -- must NOT appear in Claude Code's results when scanning via
+// the symlinked path, while a CLAUDE.md on the physical ancestry must still
+// appear. This models the exact bug report scenario: /Users/scott/projects is
+// a symlink to /Volumes/qwiizlab/projects, /Users/scott/CLAUDE.md exists (logical
+// ancestor only), and the physical workspace CLAUDE.md must still be included.
+func TestScanExcludesCLAUDEMdOnlyOnLogicalAncestry(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	tmp := t.TempDir()
+
+	// Physical tree: /tmp/.../volumes/qwiizlab/projects/actx
+	volumes := filepath.Join(tmp, "volumes")
+	physicalWorkspace := filepath.Join(volumes, "qwiizlab", "projects")
+	physicalTarget := filepath.Join(physicalWorkspace, "actx")
+	mustMkdirAll(t, physicalTarget)
+	mustWriteFile(t, filepath.Join(physicalWorkspace, "CLAUDE.md"), "physical workspace instructions")
+
+	// Logical tree: /tmp/.../users/scott/CLAUDE.md (ancestor of the symlink,
+	// never reachable once "projects" resolves to the physical dir) and
+	// /tmp/.../users/scott/projects -> physical "qwiizlab/projects" symlink.
+	usersScott := filepath.Join(tmp, "users", "scott")
+	mustMkdirAll(t, usersScott)
+	mustWriteFile(t, filepath.Join(usersScott, "CLAUDE.md"), "logical-only ancestor instructions -- must be excluded")
+	logicalProjects := filepath.Join(usersScott, "projects")
+	if err := os.Symlink(physicalWorkspace, logicalProjects); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	logicalTarget := filepath.Join(logicalProjects, "actx")
+
+	results, _, err := Run(logicalTarget, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "claude-code")
+
+	if hasPath(r.Files, filepath.Join(usersScott, "CLAUDE.md")) {
+		t.Errorf("logical-only ancestor CLAUDE.md (%s) must be excluded once the symlinked target resolves to its physical path; got files: %+v", filepath.Join(usersScott, "CLAUDE.md"), r.Files)
+	}
+	if !hasPathWithContent(r.Files, filepath.Join(physicalWorkspace, "CLAUDE.md"), "physical workspace instructions") {
+		t.Errorf("expected physical workspace CLAUDE.md to be included; got files: %+v", r.Files)
+	}
+}
+
+// TestScanSymlinkedTargetIncludesGlobalAndPhysicalInOrder verifies AC3: with a
+// symlinked target, the global ~/.claude/CLAUDE.md and the physical
+// workspace/repo CLAUDE.md files are both still included, in correct
+// precedence order (global first, then ancestors root-to-target).
+func TestScanSymlinkedTargetIncludesGlobalAndPhysicalInOrder(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	mustWriteFile(t, filepath.Join(fakeHome, ".claude", "CLAUDE.md"), "global claude instructions")
+
+	tmp := t.TempDir()
+	physicalRepo := filepath.Join(tmp, "physicalrepo")
+	physicalTarget := filepath.Join(physicalRepo, "pkg")
+	mustMkdirAll(t, physicalTarget)
+	mustMkdirAll(t, filepath.Join(physicalRepo, ".git"))
+	mustWriteFile(t, filepath.Join(physicalRepo, "CLAUDE.md"), "physical repo instructions")
+
+	symlinkDir := filepath.Join(tmp, "alias")
+	if err := os.Symlink(physicalRepo, symlinkDir); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	logicalTarget := filepath.Join(symlinkDir, "pkg")
+
+	results, _, err := Run(logicalTarget, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := findResult(t, results, "claude-code")
+
+	globalIdx := indexOfPath(r.Files, filepath.Join(fakeHome, ".claude", "CLAUDE.md"))
+	repoIdx := indexOfPath(r.Files, filepath.Join(physicalRepo, "CLAUDE.md"))
+	if globalIdx == -1 {
+		t.Fatalf("expected global CLAUDE.md to be included; got files: %+v", r.Files)
+	}
+	if repoIdx == -1 {
+		t.Fatalf("expected physical repo CLAUDE.md to be included; got files: %+v", r.Files)
+	}
+	if globalIdx > repoIdx {
+		t.Errorf("expected global CLAUDE.md (idx %d) before physical repo CLAUDE.md (idx %d)", globalIdx, repoIdx)
+	}
+}
+
+// TestBuildChainNonSymlinkTargetUnaffected verifies AC4 (no regression): a
+// target with no symlinks anywhere in its path resolves to exactly the same
+// chain as before (filepath.Abs + Clean), since EvalSymlinks on an
+// already-physical path is a no-op.
+func TestBuildChainNonSymlinkTargetUnaffected(t *testing.T) {
+	tmp := t.TempDir()
+	nested := filepath.Join(tmp, "a", "b", "c")
+	mustMkdirAll(t, nested)
+
+	chain, err := BuildChain(nested)
+	if err != nil {
+		t.Fatalf("BuildChain: %v", err)
+	}
+	last := chain.Dirs[len(chain.Dirs)-1]
+	wantTarget, _ := filepath.Abs(nested)
+	wantTarget = filepath.Clean(wantTarget)
+	if last != wantTarget {
+		t.Errorf("resolved target = %q, want %q (non-symlink target must be byte-for-byte unaffected)", last, wantTarget)
+	}
+}
+
+// TestBuildChainBrokenSymlinkReturnsError verifies AC5: a target that is (or
+// is reached through) a broken/unresolvable symlink returns an error from
+// BuildChain -- the same structured-error path Run/main already use for any
+// other unusable target -- instead of silently producing a partial chain.
+func TestBuildChainBrokenSymlinkReturnsError(t *testing.T) {
+	tmp := t.TempDir()
+	broken := filepath.Join(tmp, "broken-link")
+	if err := os.Symlink(filepath.Join(tmp, "does-not-exist"), broken); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	if _, err := BuildChain(broken); err == nil {
+		t.Fatal("BuildChain(broken symlink) = nil error, want an error")
+	}
+
+	// Same via the target-only Run entry point, so the error is confirmed to
+	// propagate out of the public API a caller (main.go) actually uses.
+	if _, _, err := Run(broken, Options{}); err == nil {
+		t.Fatal("Run(broken symlink) = nil error, want an error")
+	}
+}
+
+// TestBuildChainBrokenSymlinkedAncestorReturnsError covers the ancestor-only
+// variant of AC5: the target directory itself is real, but an ancestor
+// directory on its path is a broken symlink, so the full path cannot resolve.
+func TestBuildChainBrokenSymlinkedAncestorReturnsError(t *testing.T) {
+	tmp := t.TempDir()
+	broken := filepath.Join(tmp, "broken-link")
+	if err := os.Symlink(filepath.Join(tmp, "does-not-exist"), broken); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	target := filepath.Join(broken, "sub")
+
+	if _, err := BuildChain(target); err == nil {
+		t.Fatal("BuildChain(target under broken symlinked ancestor) = nil error, want an error")
+	}
+}
+
 // ---- scopedDirs (via Run/scanTool behavior) --------------------------------
 
 // buildTestTree creates a 4-level-deep temp directory tree:

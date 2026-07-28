@@ -43,12 +43,31 @@ type Chain struct {
 
 // BuildChain walks from target up to the filesystem root, recording every ancestor
 // directory and detecting the nearest .git boundary. See docs/design.md Step 1.
+//
+// Before walking, target is resolved to its physical form via filepath.EvalSymlinks
+// (all symlinks in the path, including symlinked ancestor directories, fully
+// resolved). This matches how a real coding-agent process resolves its cwd at
+// runtime -- e.g. Node's process.cwd() always returns the physical path, never a
+// symlinked/logical spelling -- so a target reached through a directory symlink
+// (say /Users/scott/projects/actx where /Users/scott/projects is a symlink to
+// /Volumes/qwiizlab/projects) walks the same physical ancestor chain
+// (/Volumes/qwiizlab/projects/actx, /Volumes/qwiizlab/projects, /Volumes, /) that
+// the real tool would consult, rather than the logical one the caller happened to
+// type. A broken/unresolvable symlink anywhere along the path surfaces here as an
+// error (from EvalSymlinks), which propagates up through Run's existing error
+// return rather than producing partial output.
 func BuildChain(target string) (Chain, error) {
 	abs, err := filepath.Abs(target)
 	if err != nil {
 		return Chain{}, err
 	}
 	abs = filepath.Clean(abs)
+
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return Chain{}, err
+	}
+	abs = filepath.Clean(resolved)
 
 	var reversed []string
 	cur := abs
