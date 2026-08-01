@@ -1,0 +1,37 @@
+cmd/actx/main.go
+  s_9b21ce52652cba::t_4d431ce75c1c4d 19-23
+go.mod
+  s_9b21ce52652cba::t_e648d062de1af1 1
+internal/compile/compile_test.go
+  s_9b21ce52652cba::t_4d431ce75c1c4d 9-11
+internal/render/render.go
+  s_9b21ce52652cba::t_4d431ce75c1c4d 11-13
+README.md
+  s_9b21ce52652cba::t_f22cf25a13a08e 3
+internal/scan/scan.go
+  s_9b21ce52652cba::t_4d431ce75c1c4d 11
+internal/compile/compile.go
+  s_9b21ce52652cba::t_4d431ce75c1c4d 18-19
+internal/scan/scan_test.go
+  s_9b21ce52652cba::t_4d431ce75c1c4d 11
+internal/inspect/inspect_test.go
+  s_9b21ce52652cba::t_4d431ce75c1c4d 11
+internal/render/render_test.go
+  s_9b21ce52652cba::t_4d431ce75c1c4d 10-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.19",
+  "base_commit_sha": "06518312f32722687b561436052860dcef918305",
+  "prompts": {},
+  "sessions": {
+    "s_9b21ce52652cba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "298315b6-7005-48f0-81a7-6731097175f7",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
