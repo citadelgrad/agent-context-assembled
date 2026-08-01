@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/citadelgrad/actx/internal/compile"
-	"github.com/citadelgrad/actx/internal/inspect"
-	"github.com/citadelgrad/actx/internal/render"
-	"github.com/citadelgrad/actx/internal/scan"
-	"github.com/citadelgrad/actx/internal/tools"
+	"github.com/citadelgrad/agent-context-assembled/internal/compile"
+	"github.com/citadelgrad/agent-context-assembled/internal/inspect"
+	"github.com/citadelgrad/agent-context-assembled/internal/render"
+	"github.com/citadelgrad/agent-context-assembled/internal/scan"
+	"github.com/citadelgrad/agent-context-assembled/internal/tools"
 )
 
 // ---- fixtures ------------------------------------------------------------

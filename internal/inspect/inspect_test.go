@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/citadelgrad/actx/internal/scan"
+	"github.com/citadelgrad/agent-context-assembled/internal/scan"
 )
 
 // Tests in this file are written as package inspect (in-package, not

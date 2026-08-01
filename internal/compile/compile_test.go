@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/citadelgrad/actx/internal/compile"
-	"github.com/citadelgrad/actx/internal/scan"
-	"github.com/citadelgrad/actx/internal/tools"
+	"github.com/citadelgrad/agent-context-assembled/internal/compile"
+	"github.com/citadelgrad/agent-context-assembled/internal/scan"
+	"github.com/citadelgrad/agent-context-assembled/internal/tools"
 )
 
 // mustWriteFile is a small test helper wrapping os.WriteFile with a t.Fatal,

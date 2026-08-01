@@ -1,6 +1,6 @@
 # actx
 
-[![CI](https://github.com/citadelgrad/actx/actions/workflows/ci.yml/badge.svg)](https://github.com/citadelgrad/actx/actions/workflows/ci.yml)
+[![CI](https://github.com/citadelgrad/agent-context-assembled/actions/workflows/ci.yml/badge.svg)](https://github.com/citadelgrad/agent-context-assembled/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Shows the **full compiled set** of AI coding-agent instruction files that actually apply at a

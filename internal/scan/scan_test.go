@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/citadelgrad/actx/internal/tools"
+	"github.com/citadelgrad/agent-context-assembled/internal/tools"
 )
 
 // tempDir returns a fresh test temp directory resolved to its physical path

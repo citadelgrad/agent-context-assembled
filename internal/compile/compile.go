@@ -15,8 +15,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/citadelgrad/actx/internal/scan"
-	"github.com/citadelgrad/actx/internal/tools"
+	"github.com/citadelgrad/agent-context-assembled/internal/scan"
+	"github.com/citadelgrad/agent-context-assembled/internal/tools"
 )
 
 // Chunk is one contiguous piece of a tool's compiled context, corresponding to
