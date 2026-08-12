@@ -1,0 +1,20 @@
+internal/scan/chain_downward_properties_test.go
+  h_12ee2b2686c122 128-147
+internal/scan/scan.go
+  h_12ee2b2686c122 161,247,283-285,295
+internal/scan/scan_properties_test.go
+  h_12ee2b2686c122 8,82-108
+internal/tools/tools.go
+  h_12ee2b2686c122 36-45,57-58,87-88,137-138,173-174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "74ef5b9c38b53012218401d648ec48d0ac44b335",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
