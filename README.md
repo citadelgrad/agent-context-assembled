@@ -79,9 +79,9 @@ Flags:
   line by default, or a JSON array if combined with `--json`). An unknown slug is a usage error
   (exit 2).
 - `--version` — print the version and exit.
-- `--max-chars` — safety cap on total output size in characters (default `80000`, ~20,000 tokens
-  at this tool's `len/4` estimate). Output over the cap is written to a temp file instead of
-  stdout, with a short notice (structured JSON in `--json` mode) printed in its place — so a large
+- `--max-chars` — safety cap on total output size in Unicode code points (default `80000`, ~20,000
+  tokens at this tool's character-count/4 estimate). Output over the cap is written to a temp file
+  instead of stdout, with a short notice (structured JSON in `--json` mode) printed in its place — so a large
   scan can't silently fill a calling agent's context window. This is an actx-side default, not a
   claim about any tool's own limit (compare the sourced, documented limits under `LimitChecks` in
   `--compile` output). Pass `--max-chars=0` to disable the cap and always print full output.
@@ -190,8 +190,8 @@ the full breakdown):
 - **N/A** (Aider) — nothing is auto-loaded, so `--compile` reports the tool as empty with an
   explanation rather than fabricating content.
 
-Token counts are a simple `len(content)/4` heuristic, always labeled as an **estimate**, never
-presented as an exact tokenizer count. Documented-size-limit checks are only run for tools where
+Token counts are a simple Unicode-character-count/4 heuristic, always labeled as an **estimate**,
+never presented as an exact tokenizer count. Documented-size-limit checks are only run for tools where
 `docs/research.md` cites a sourced numeric limit: Codex CLI's `project_doc_max_bytes` (32 KiB
 default) and Windsurf's `global_rules.md` (6,000 chars) / per-file rules (12,000 chars) caps.
 Every other tool skips this check rather than inventing a number.
@@ -281,6 +281,45 @@ go test ./...
 Tests are hermetic (`$HOME` is redirected to a temp dir, so nothing reads this machine's real
 `~/.claude`, `~/.codex`, etc.) and use only the standard `testing` package — no test-framework
 dependency.
+
+### Property tests and fuzzing
+
+Example tests prove that known inputs produce known outputs. That is necessary, but it is weak
+coverage for `actx`: its behavior depends on arbitrary Unicode, malformed frontmatter and JSONL,
+filesystem layouts, glob patterns, precedence rules, and long sequences of records. The interesting
+failures live in combinations nobody would think to write as individual fixtures.
+
+The test suite therefore also describes properties that must hold for whole classes of input, using
+Go's native fuzzing support and deterministic generated cases. These tests check invariants such as:
+
+- compiling instruction files is a lossless, ordered transformation;
+- filtering is stable, order-preserving, and idempotent;
+- text truncation preserves valid UTF-8 and counts Unicode code points rather than bytes;
+- JSON rendering preserves content and order, respects filtering, and has stable empty-output shapes;
+- Codex rollout parsing behaves like a state machine: irrelevant records do not matter, later
+  relevant records win, and malformed or partial input cannot silently produce confirmed state;
+- glob expansion and downward scans stay inside their root, return sorted unique regular files,
+  honor depth/visit limits, and behave deterministically; and
+- artifact counts and newest timestamps ignore directories, symlinks, and unrelated filesystem
+  entries where those node types are not valid artifacts.
+
+This work found real bugs rather than merely increasing a coverage number. It fixed UTF-8 previews
+that could split characters, byte-based "character" limits, partial Codex state accepted after a
+scanner error, empty records erasing prior instructions, incorrect global fallback precedence,
+duplicate downward matches, traversal-limit boundary errors, and artifact counts that disagreed
+with the accepted file types. The minimized cases remain as regression tests.
+
+Ordinary `go test ./...` runs every committed fuzz seed deterministically. CI also mutates all
+registered fuzz targets for a bounded time on every push and pull request, with longer scheduled
+runs. A matrix-coverage check fails CI if a `Fuzz*` target is added, removed, or renamed without
+updating the workflow. To fuzz one target locally:
+
+```bash
+go test ./internal/inspect -run '^$' -fuzz '^FuzzReadCodexRolloutStateMachine$' -fuzztime 30s
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#fuzz-testing) for corpus policy and filesystem-fuzzing safety
+rules.
 
 ## Build
 
