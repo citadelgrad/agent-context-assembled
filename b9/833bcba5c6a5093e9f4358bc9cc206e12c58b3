@@ -1,0 +1,16 @@
+.github/workflows/ci.yml
+  h_12ee2b2686c122 8-10,39-84
+CONTRIBUTING.md
+  h_12ee2b2686c122 14-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "b9833bcba5c6a5093e9f4358bc9cc206e12c58b3",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
