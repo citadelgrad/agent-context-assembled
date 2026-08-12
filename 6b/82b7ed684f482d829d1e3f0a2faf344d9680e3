@@ -1,0 +1,14 @@
+internal/compile/compile_fuzz_test.go
+  h_12ee2b2686c122 1-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "6b82b7ed684f482d829d1e3f0a2faf344d9680e3",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
