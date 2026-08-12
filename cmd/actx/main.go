@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -66,19 +67,9 @@ func writeSizeGuarded(w io.Writer, maxChars int, jsonMode bool, outputPath strin
 	if jsonMode {
 		ext = ".json"
 	}
-	var f *os.File
-	var err error
-	if outputPath != "" {
-		f, err = os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	} else {
-		f, err = os.CreateTemp("", "actx-output-*"+ext)
-	}
+	actualPath, err := writeOverflowFile(outputPath, ext, buf.Bytes())
 	if err != nil {
-		return fmt.Errorf("output exceeded %d chars but could not create overflow file: %w", maxChars, err)
-	}
-	defer f.Close()
-	if _, err := f.Write(buf.Bytes()); err != nil {
-		return fmt.Errorf("writing overflow output to %s: %w", f.Name(), err)
+		return fmt.Errorf("output exceeded %d chars but could not write overflow file: %w", maxChars, err)
 	}
 
 	tokenEstimate := charCount / 4
@@ -91,13 +82,71 @@ func writeSizeGuarded(w io.Writer, maxChars int, jsonMode bool, outputPath strin
 			Reason:        fmt.Sprintf("output exceeded the %d-char safety cap (~%d tokens); re-run with --max-chars=0 to print it directly, or a higher --max-chars value", maxChars, maxChars/4),
 			CharCount:     charCount,
 			TokenEstimate: tokenEstimate,
-			OutputFile:    f.Name(),
+			OutputFile:    actualPath,
 		})
 	}
 	fmt.Fprintf(w, "Output too large: %d chars (~%d tokens) exceeds the %d-char safety cap.\n", charCount, tokenEstimate, maxChars)
-	fmt.Fprintf(w, "Full output written to: %s\n", f.Name())
+	fmt.Fprintf(w, "Full output written to: %s\n", actualPath)
 	fmt.Fprintln(w, "Re-run with --max-chars=0 to print it directly instead, or a higher --max-chars value.")
 	return nil
+}
+
+func writeOverflowFile(outputPath, ext string, content []byte) (string, error) {
+	if outputPath == "" {
+		f, err := os.CreateTemp("", "actx-output-*"+ext)
+		if err != nil {
+			return "", err
+		}
+		path := f.Name()
+		if _, err := f.Write(content); err != nil {
+			_ = f.Close()
+			_ = os.Remove(path)
+			return "", fmt.Errorf("writing %s: %w", path, err)
+		}
+		if err := f.Close(); err != nil {
+			_ = os.Remove(path)
+			return "", fmt.Errorf("closing %s: %w", path, err)
+		}
+		return path, nil
+	}
+
+	mode := os.FileMode(0o600)
+	if info, err := os.Stat(outputPath); err == nil {
+		mode = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	dir := filepath.Dir(outputPath)
+	tmp, err := os.CreateTemp(dir, ".actx-output-*")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		cleanup()
+		return "", err
+	}
+	if _, err := tmp.Write(content); err != nil {
+		cleanup()
+		return "", fmt.Errorf("writing %s: %w", tmpPath, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return "", fmt.Errorf("syncing %s: %w", tmpPath, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("closing %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, outputPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("replacing %s: %w", outputPath, err)
+	}
+	return outputPath, nil
 }
 
 func main() {

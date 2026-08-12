@@ -340,6 +340,78 @@ func TestRunMaxCharsWritesOverflowToConfiguredOutputFile(t *testing.T) {
 	}
 }
 
+func TestConfiguredOverflowAtomicallyReplacesExistingFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("atomic replacement identity semantics are platform-specific")
+	}
+	isolateHome(t)
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "CLAUDE.md"), "this content is long enough to exceed a tiny max-chars cap")
+	outputPath := filepath.Join(t.TempDir(), "full-output.txt")
+	if err := os.WriteFile(outputPath, []byte("existing content"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := run([]string{"--max-chars=50", "--out=" + outputPath, dir}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(before, after) {
+		t.Fatal("configured overflow was truncated in place instead of atomically replaced")
+	}
+	if got := after.Mode().Perm(); got != 0o640 {
+		t.Fatalf("replacement mode = %04o, want existing mode 0640", got)
+	}
+}
+
+func TestConfiguredOutputRemainsUntouchedBelowCap(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "CLAUDE.md"), "small")
+	outputPath := filepath.Join(t.TempDir(), "full-output.txt")
+	if err := os.WriteFile(outputPath, []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := run([]string{"--max-chars=100000", "--out=" + outputPath, dir}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(content); got != "keep me" {
+		t.Fatalf("below-cap output changed --out destination to %q", got)
+	}
+}
+
+func TestConfiguredJSONOverflowWritesValidJSON(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "CLAUDE.md"), strings.Repeat("x", 100))
+	outputPath := filepath.Join(t.TempDir(), "full-output.json")
+	var notice bytes.Buffer
+	if err := run([]string{"--json", "--max-chars=50", "--out=" + outputPath, dir}, &notice); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output []map[string]any
+	if err := json.Unmarshal(content, &output); err != nil {
+		t.Fatalf("configured JSON overflow is invalid: %v", err)
+	}
+}
+
 func TestRunMaxCharsZeroDisablesCap(t *testing.T) {
 	isolateHome(t)
 	dir := t.TempDir()
