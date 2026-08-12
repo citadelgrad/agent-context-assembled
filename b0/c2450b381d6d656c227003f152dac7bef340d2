@@ -1,0 +1,18 @@
+internal/inspect/inspect.go
+  h_12ee2b2686c122 22,318-319,321-322,356-358
+internal/inspect/inspect_fuzz_test.go
+  h_12ee2b2686c122 1-76
+internal/inspect/inspect_test.go
+  h_12ee2b2686c122 349-360
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "b0c2450b381d6d656c227003f152dac7bef340d2",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
