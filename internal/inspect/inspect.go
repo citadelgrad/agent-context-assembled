@@ -472,9 +472,11 @@ func geminiCLIReport(home, absTarget string) Report {
 					continue
 				}
 				for _, ce := range chatEntries {
-					count++
-					if info, err := ce.Info(); err == nil && info.ModTime().After(newest) {
-						newest = info.ModTime()
+					if info, err := ce.Info(); err == nil && info.Mode().IsRegular() {
+						count++
+						if info.ModTime().After(newest) {
+							newest = info.ModTime()
+						}
 					}
 				}
 			}
@@ -608,16 +610,23 @@ func clineReport(home string) Report {
 				continue
 			}
 			var newest time.Time
+			count := 0
 			for _, e := range entries {
-				if info, err := e.Info(); err == nil && info.ModTime().After(newest) {
-					newest = info.ModTime()
+				if info, err := e.Info(); err == nil && info.IsDir() {
+					count++
+					if info.ModTime().After(newest) {
+						newest = info.ModTime()
+					}
 				}
+			}
+			if count == 0 {
+				continue
 			}
 			base.Mechanism = MechanismMetadataOnly
 			base.ArtifactPath = dir
-			base.ArtifactCount = len(entries)
+			base.ArtifactCount = count
 			base.LastModified = newest
-			base.Summary = fmt.Sprintf("Found %d Cline task folder(s) at %s; api_conversation_history.json confirmed by Cline's own docs to exclude the system prompt.", len(entries), dir)
+			base.Summary = fmt.Sprintf("Found %d Cline task folder(s) at %s; api_conversation_history.json confirmed by Cline's own docs to exclude the system prompt.", count, dir)
 			break
 		}
 	}
@@ -641,16 +650,23 @@ func hermesReport(home string) Report {
 		dir := filepath.Join(home, ".hermes", "sessions")
 		if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
 			var newest time.Time
+			count := 0
 			for _, e := range entries {
-				if info, err := e.Info(); err == nil && info.ModTime().After(newest) {
-					newest = info.ModTime()
+				if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
+					count++
+					if info.ModTime().After(newest) {
+						newest = info.ModTime()
+					}
 				}
+			}
+			if count == 0 {
+				return base
 			}
 			base.Mechanism = MechanismMetadataOnly
 			base.ArtifactPath = dir
-			base.ArtifactCount = len(entries)
+			base.ArtifactCount = count
 			base.LastModified = newest
-			base.Summary = fmt.Sprintf("Found %d Hermes session file(s)/folder(s) at %s; content format not source-verified, so only existence/count is reported.", len(entries), dir)
+			base.Summary = fmt.Sprintf("Found %d Hermes session file(s) at %s; content format not source-verified, so only existence/count is reported.", count, dir)
 		}
 	}
 	return base
