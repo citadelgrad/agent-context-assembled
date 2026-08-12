@@ -83,7 +83,13 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           fuzz_time=10s
+          parallel=4
           if [ "$EVENT_NAME" = schedule ]; then
             fuzz_time=2m
           fi
-          go test "$PACKAGE" -run '^$' -fuzz "^${TARGET}$" -fuzztime "$fuzz_time" -parallel 4
+          # Filesystem fuzz cases create and clean temporary trees per input. Running
+          # them serially avoids workers still cleaning up at the fuzz deadline.
+          if [ "$TARGET" = FuzzExpandCandidateFilesystemInvariants ]; then
+            parallel=1
+          fi
+          go test "$PACKAGE" -run '^$' -fuzz "^${TARGET}$" -fuzztime "$fuzz_time" -parallel "$parallel"

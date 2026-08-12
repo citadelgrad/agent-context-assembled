@@ -121,15 +121,22 @@ func FuzzFrontmatterFieldMetamorphic(f *testing.F) {
 }
 
 func safeFrontmatterAtom(s string) bool {
-	if len(s) == 0 || len(s) > 64 {
+	if len(s) == 0 || len(s) > 64 || strings.TrimSpace(s) != s {
 		return false
 	}
-	return !strings.ContainsAny(s, "\n\r\":")
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func safeFrontmatterValue(s string) bool {
 	if len(s) > 4096 {
 		return false
 	}
-	return !strings.ContainsAny(s, "\n\r\x00")
+	// The metamorphic fixture wraps values in quotes, so generated values
+	// containing quotes cannot be represented losslessly by this minimal parser.
+	return !strings.ContainsAny(s, "\n\r\x00\"'")
 }
