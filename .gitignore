@@ -6,6 +6,7 @@
 *.out
 coverage.txt
 .DS_Store
+.foundry/
 
 # Beads / Dolt files (added by bd init)
 .dolt/
