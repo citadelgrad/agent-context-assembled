@@ -34,7 +34,8 @@ type Chunk struct {
 	// means "always applied when this tool loads at all."
 	Condition string `json:"condition,omitempty"`
 	Content   string `json:"content"`
-	// CharCount is len(Content); ChunkTokenEstimate is CharCount/4, both
+	// CharCount is the number of Unicode code points in Content;
+	// ChunkTokenEstimate is CharCount/4, both
 	// pre-computed for convenience in JSON consumers.
 	CharCount          int `json:"charCount"`
 	ChunkTokenEstimate int `json:"chunkTokenEstimate"`
@@ -134,7 +135,7 @@ func compileTool(r scan.ToolResult) ToolCompile {
 			Condition: cond,
 			Content:   f.Content,
 		}
-		chunk.CharCount = len(chunk.Content)
+		chunk.CharCount = utf8.RuneCountInString(chunk.Content)
 		chunk.ChunkTokenEstimate = tokenEstimate(chunk.CharCount)
 		tc.Chunks = append(tc.Chunks, chunk)
 
@@ -147,7 +148,7 @@ func compileTool(r scan.ToolResult) ToolCompile {
 	}
 
 	tc.Assembled = assembled.String()
-	tc.CharCount = len(tc.Assembled)
+	tc.CharCount = utf8.RuneCountInString(tc.Assembled)
 	tc.TokenEstimate = tokenEstimate(tc.CharCount)
 	tc.LimitChecks = limitChecks(r)
 	return tc

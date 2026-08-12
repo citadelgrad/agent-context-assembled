@@ -450,6 +450,16 @@ func TestCompileTextTruncationScalesWithChunkCount(t *testing.T) {
 	}
 }
 
+func TestTextPreviewHandlesVeryLargeUnicodeInput(t *testing.T) {
+	content := strings.Repeat("🙂", 1_000_000)
+	results := []scan.ToolResult{resultWithFiles("Claude Code", "claude-code", scan.MatchedFile{Path: "/a", Content: content})}
+	var buf bytes.Buffer
+	render.Text(&buf, results, chainFixture("/target"), render.Options{})
+	if !strings.Contains(buf.String(), "truncated") {
+		t.Fatal("large Unicode preview was not truncated")
+	}
+}
+
 func TestCompileTextFullOptionDisablesTruncation(t *testing.T) {
 	content := strings.Repeat("b", 10000)
 	r := compileFixture("Claude Code", "claude-code", false)

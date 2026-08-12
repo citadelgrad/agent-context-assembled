@@ -214,11 +214,11 @@ func TestCompileAdditiveConcatenationOrderAndProvenance(t *testing.T) {
 }
 
 // TestCompileChunkCharCountAndTokenEstimateArithmetic verifies
-// CharCount=len(Content) exactly and ChunkTokenEstimate=CharCount/4 using
+// CharCount counts Unicode code points and ChunkTokenEstimate=CharCount/4 using
 // integer division (not rounded), including a case where the remainder would
 // round up if not truncated.
 func TestCompileChunkCharCountAndTokenEstimateArithmetic(t *testing.T) {
-	content := strings.Repeat("a", 101) // 101/4 = 25.25 -> want 25, not 26
+	content := strings.Repeat("a", 100) + "🙂" // 101 code points / 4 = 25.25 -> want 25, not 26
 	files := []scan.MatchedFile{{Path: "/x/CLAUDE.md", Content: content, Note: "target dir: primary"}}
 	results := []scan.ToolResult{result(t, "claude-code", files...)}
 	out := compile.Run(results)
@@ -232,8 +232,8 @@ func TestCompileChunkCharCountAndTokenEstimateArithmetic(t *testing.T) {
 		t.Errorf("ChunkTokenEstimate = %d, want 25 (101/4 truncated, not rounded)", c.ChunkTokenEstimate)
 	}
 
-	if tc.CharCount != len(tc.Assembled) {
-		t.Errorf("ToolCompile.CharCount = %d, want len(Assembled) = %d", tc.CharCount, len(tc.Assembled))
+	if tc.CharCount != utf8.RuneCountInString(tc.Assembled) {
+		t.Errorf("ToolCompile.CharCount = %d, want rune count of Assembled = %d", tc.CharCount, utf8.RuneCountInString(tc.Assembled))
 	}
 	if tc.TokenEstimate != tc.CharCount/4 {
 		t.Errorf("ToolCompile.TokenEstimate = %d, want CharCount/4 = %d", tc.TokenEstimate, tc.CharCount/4)

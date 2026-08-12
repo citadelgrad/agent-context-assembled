@@ -15,6 +15,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/citadelgrad/agent-context-assembled/internal/compile"
 	"github.com/citadelgrad/agent-context-assembled/internal/inspect"
@@ -55,7 +56,8 @@ func writeSizeGuarded(w io.Writer, maxChars int, jsonMode bool, outputPath strin
 	if err := render(&buf); err != nil {
 		return err
 	}
-	if maxChars <= 0 || buf.Len() <= maxChars {
+	charCount := utf8.RuneCount(buf.Bytes())
+	if maxChars <= 0 || charCount <= maxChars {
 		_, err := w.Write(buf.Bytes())
 		return err
 	}
@@ -79,7 +81,7 @@ func writeSizeGuarded(w io.Writer, maxChars int, jsonMode bool, outputPath strin
 		return fmt.Errorf("writing overflow output to %s: %w", f.Name(), err)
 	}
 
-	tokenEstimate := buf.Len() / 4
+	tokenEstimate := charCount / 4
 	if jsonMode {
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
@@ -87,12 +89,12 @@ func writeSizeGuarded(w io.Writer, maxChars int, jsonMode bool, outputPath strin
 		return enc.Encode(outputOverflow{
 			Truncated:     true,
 			Reason:        fmt.Sprintf("output exceeded the %d-char safety cap (~%d tokens); re-run with --max-chars=0 to print it directly, or a higher --max-chars value", maxChars, maxChars/4),
-			CharCount:     buf.Len(),
+			CharCount:     charCount,
 			TokenEstimate: tokenEstimate,
 			OutputFile:    f.Name(),
 		})
 	}
-	fmt.Fprintf(w, "Output too large: %d chars (~%d tokens) exceeds the %d-char safety cap.\n", buf.Len(), tokenEstimate, maxChars)
+	fmt.Fprintf(w, "Output too large: %d chars (~%d tokens) exceeds the %d-char safety cap.\n", charCount, tokenEstimate, maxChars)
 	fmt.Fprintf(w, "Full output written to: %s\n", f.Name())
 	fmt.Fprintln(w, "Re-run with --max-chars=0 to print it directly instead, or a higher --max-chars value.")
 	return nil

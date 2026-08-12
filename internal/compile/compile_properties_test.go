@@ -58,16 +58,18 @@ func FuzzCompileLosslessOrderedTransformation(f *testing.F) {
 			if chunk.Path != file.Path || chunk.Reason != file.Note || chunk.Content != file.Content || chunk.Condition != "" {
 				t.Fatalf("chunk %d = %+v, want lossless projection of %+v", i, chunk, file)
 			}
-			if chunk.CharCount != len(file.Content) || chunk.ChunkTokenEstimate != len(file.Content)/4 {
-				t.Fatalf("chunk %d counts = %d/%d, want %d/%d", i, chunk.CharCount, chunk.ChunkTokenEstimate, len(file.Content), len(file.Content)/4)
+			charCount := utf8.RuneCountInString(file.Content)
+			if chunk.CharCount != charCount || chunk.ChunkTokenEstimate != charCount/4 {
+				t.Fatalf("chunk %d counts = %d/%d, want %d/%d", i, chunk.CharCount, chunk.ChunkTokenEstimate, charCount, charCount/4)
 			}
 		}
 		wantAssembled := referenceAssemble(files)
 		if tc.Assembled != wantAssembled {
 			t.Fatalf("assembled mismatch\ngot:  %q\nwant: %q", tc.Assembled, wantAssembled)
 		}
-		if tc.CharCount != len(wantAssembled) || tc.TokenEstimate != len(wantAssembled)/4 {
-			t.Fatalf("tool counts = %d/%d, want %d/%d", tc.CharCount, tc.TokenEstimate, len(wantAssembled), len(wantAssembled)/4)
+		charCount := utf8.RuneCountInString(wantAssembled)
+		if tc.CharCount != charCount || tc.TokenEstimate != charCount/4 {
+			t.Fatalf("tool counts = %d/%d, want %d/%d", tc.CharCount, tc.TokenEstimate, charCount, charCount/4)
 		}
 		if !utf8.ValidString(tc.Assembled) {
 			t.Fatal("assembled output is invalid UTF-8 for valid UTF-8 inputs")

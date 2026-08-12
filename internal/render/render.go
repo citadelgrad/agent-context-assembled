@@ -30,11 +30,21 @@ type Options struct {
 const previewLimit = 2000
 
 func truncatePreview(content string, limit int) (string, bool) {
-	if utf8.RuneCountInString(content) <= limit {
+	if limit < 0 {
+		limit = 0
+	}
+	byteOffset := 0
+	for range limit {
+		if byteOffset >= len(content) {
+			return content, false
+		}
+		_, size := utf8.DecodeRuneInString(content[byteOffset:])
+		byteOffset += size
+	}
+	if byteOffset >= len(content) {
 		return content, false
 	}
-	runes := []rune(content)
-	return string(runes[:limit]), true
+	return content[:byteOffset], true
 }
 
 // jsonFile mirrors scan.MatchedFile for the --json output contract described in

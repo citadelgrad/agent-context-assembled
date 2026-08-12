@@ -296,6 +296,19 @@ func TestRunMaxCharsWritesOverflowNoticeInJSONMode(t *testing.T) {
 	}
 }
 
+func TestWriteSizeGuardedCountsUnicodeCharacters(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeSizeGuarded(&buf, 2, false, "", func(out *bytes.Buffer) error {
+		out.WriteString("🙂界")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "🙂界" {
+		t.Fatalf("two Unicode characters should fit a two-character cap, got %q", got)
+	}
+}
+
 func TestRunMaxCharsWritesOverflowToConfiguredOutputFile(t *testing.T) {
 	isolateHome(t)
 	dir := t.TempDir()
