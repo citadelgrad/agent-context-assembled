@@ -153,7 +153,13 @@ func scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
 					Content: content,
 					Note:    "global: " + gc.Note,
 				})
+				if t.FirstMatchWins {
+					break
+				}
 			}
+		}
+		if t.FirstMatchWins && len(files) > 0 {
+			break
 		}
 	}
 
