@@ -1,0 +1,18 @@
+internal/compile/compile_fuzz_test.go
+  h_12ee2b2686c122 20,30,32-39,41,53-57,59,63-79,89,123-124,127,130-134
+internal/inspect/artifact_properties_test.go
+  h_12ee2b2686c122 10-12,15-25,28-29,33-35,37-44,46-48,52-55,57-87,90,93-95,99-101,103-104,107-108,111-125
+internal/render/render_fuzz_test.go
+  h_12ee2b2686c122 83-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "ccc7ac79969ffb06aee2000fffe7476b3819239a",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
