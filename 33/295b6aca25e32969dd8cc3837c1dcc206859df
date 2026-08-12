@@ -1,0 +1,18 @@
+README.md
+  h_12ee2b2686c122 88-92
+cmd/actx/main.go
+  h_12ee2b2686c122 48-49,53,67-73,75,182-183,213,289,293,308,312,319,323
+cmd/actx/main_test.go
+  h_12ee2b2686c122 9,299-329
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "33295b6aca25e32969dd8cc3837c1dcc206859df",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
