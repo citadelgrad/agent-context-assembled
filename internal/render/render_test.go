@@ -3,9 +3,11 @@ package render_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/citadelgrad/agent-context-assembled/internal/compile"
 	"github.com/citadelgrad/agent-context-assembled/internal/inspect"
@@ -239,6 +241,20 @@ func TestTextDoesNotTruncateWithFullOption(t *testing.T) {
 	}
 }
 
+func TestTextPreviewTruncationCountsCharactersAndPreservesUTF8(t *testing.T) {
+	for _, runeCount := range []int{1999, 2000, 2001, 2002, 2003} {
+		t.Run(fmt.Sprintf("runes_%d", runeCount), func(t *testing.T) {
+			content := strings.Repeat("a", 1998) + "🙂" + strings.Repeat("界", runeCount-1999)
+			results := []scan.ToolResult{
+				resultWithFiles("Claude Code", "claude-code", scan.MatchedFile{Path: "/a/CLAUDE.md", Content: content, Note: "n"}),
+			}
+			var buf bytes.Buffer
+			render.Text(&buf, results, chainFixture("/target"), render.Options{})
+			assertUnicodePreview(t, buf.String(), runeCount > 2000, "... (truncated, use --full for complete content)")
+		})
+	}
+}
+
 func TestTextShowsEmptyFileMarker(t *testing.T) {
 	results := []scan.ToolResult{
 		resultWithFiles("Claude Code", "claude-code", scan.MatchedFile{Path: "/a/CLAUDE.md", Content: "   \n  ", Note: "n"}),
@@ -451,6 +467,17 @@ func TestCompileTextFullOptionDisablesTruncation(t *testing.T) {
 	}
 }
 
+func TestCompileTextPreviewTruncationCountsCharactersAndPreservesUTF8(t *testing.T) {
+	content := strings.Repeat("a", 1998) + "🙂界\r\ne\u0301"
+	r := compileFixture("Claude Code", "claude-code", false)
+	r.Assembled = content
+	r.Chunks = []compile.Chunk{{Path: "/a"}}
+
+	var buf bytes.Buffer
+	render.CompileText(&buf, []compile.ToolCompile{r}, chainFixture("/target"), render.Options{})
+	assertUnicodePreview(t, buf.String(), true, "... (truncated, use --full for complete assembled content)")
+}
+
 func TestCompileTextNoMatchesAnywhereShowsHint(t *testing.T) {
 	results := []compile.ToolCompile{compileFixture("Aider", "aider", true)}
 	var buf bytes.Buffer
@@ -590,6 +617,30 @@ func TestInspectTextFullOptionShowsCompleteExtractedContent(t *testing.T) {
 	}
 	if !strings.Contains(out, big) {
 		t.Error("expected full extracted content with full=true")
+	}
+}
+
+func TestInspectTextPreviewTruncationCountsCharactersAndPreservesUTF8(t *testing.T) {
+	content := strings.Repeat("a", 1999) + "🙂界"
+	reports := []inspect.Report{
+		{Tool: "Aider", Slug: "aider", Mechanism: inspect.MechanismContentConfirmed, Summary: "s", Confidence: "c", ExtractedContent: content},
+	}
+	var buf bytes.Buffer
+	render.InspectText(&buf, reports, false)
+	assertUnicodePreview(t, buf.String(), true, "... (truncated, use --full for complete content)")
+}
+
+func assertUnicodePreview(t *testing.T, output string, truncated bool, marker string) {
+	t.Helper()
+	if !utf8.ValidString(output) {
+		t.Fatal("preview output is not valid UTF-8")
+	}
+	wantMarkers := 0
+	if truncated {
+		wantMarkers = 1
+	}
+	if got := strings.Count(output, marker); got != wantMarkers {
+		t.Fatalf("truncation markers = %d, want %d", got, wantMarkers)
 	}
 }
 

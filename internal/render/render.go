@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/citadelgrad/agent-context-assembled/internal/compile"
 	"github.com/citadelgrad/agent-context-assembled/internal/inspect"
@@ -27,6 +28,14 @@ type Options struct {
 // previewLimit is the default number of characters shown per file in the text
 // renderer before truncating, unless Options.Full is set.
 const previewLimit = 2000
+
+func truncatePreview(content string, limit int) (string, bool) {
+	if utf8.RuneCountInString(content) <= limit {
+		return content, false
+	}
+	runes := []rune(content)
+	return string(runes[:limit]), true
+}
 
 // jsonFile mirrors scan.MatchedFile for the --json output contract described in
 // the README: an array per tool of {path, content} in application order. Note is
@@ -102,9 +111,8 @@ func Text(w io.Writer, results []scan.ToolResult, chain scan.Chain, opts Options
 			fmt.Fprintf(w, "    %s\n", f.Note)
 			body := f.Content
 			truncated := false
-			if !opts.Full && len(body) > previewLimit {
-				body = body[:previewLimit]
-				truncated = true
+			if !opts.Full {
+				body, truncated = truncatePreview(body, previewLimit)
 			}
 			if strings.TrimSpace(body) == "" {
 				fmt.Fprintln(w, "    (empty file)")
@@ -176,7 +184,7 @@ func CompileText(w io.Writer, results []compile.ToolCompile, chain scan.Chain, o
 
 		body := r.Assembled
 		truncated := false
-		if !opts.Full && len(body) > previewLimit*len(r.Chunks) && len(body) > previewLimit {
+		if !opts.Full {
 			// For compile mode, scale the preview budget with chunk count so
 			// multi-file tools aren't unfairly cut to a single-file's worth of
 			// text; still bounded so --full is meaningfully different.
@@ -184,8 +192,7 @@ func CompileText(w io.Writer, results []compile.ToolCompile, chain scan.Chain, o
 			if limit < previewLimit {
 				limit = previewLimit
 			}
-			body = body[:limit]
-			truncated = true
+			body, truncated = truncatePreview(body, limit)
 		}
 		for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
 			fmt.Fprintf(w, "%s\n", line)
@@ -250,9 +257,8 @@ func InspectText(w io.Writer, reports []inspect.Report, full bool) {
 			fmt.Fprintln(w, "  --- extracted content ---")
 			body := r.ExtractedContent
 			truncated := false
-			if !full && len(body) > previewLimit {
-				body = body[:previewLimit]
-				truncated = true
+			if !full {
+				body, truncated = truncatePreview(body, previewLimit)
 			}
 			for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
 				fmt.Fprintf(w, "  %s\n", line)
