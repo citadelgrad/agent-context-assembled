@@ -80,6 +80,51 @@ func FuzzJSONRenderingProjectionAndFiltering(f *testing.F) {
 			if bytes.Contains(buf.Bytes(), []byte(`\u003c`)) || bytes.Contains(buf.Bytes(), []byte(`\u003e`)) || bytes.Contains(buf.Bytes(), []byte(`\u0026`)) {
 				t.Fatal("HTML escaping was enabled")
 			}
+			for _, compileAll := range []bool{false, true} {
+				content := ""
+				if len(parts) > 0 {
+					content = string(parts[0])
+				}
+				toolCompiles := []compile.ToolCompile{
+					{Tool: "T", Slug: "t", Assembled: content, Chunks: []compile.Chunk{{Path: "/x.md", Content: content}}},
+				}
+				var cBuf, fBuf bytes.Buffer
+				if err := render.CompileJSON(&cBuf, toolCompiles, render.Options{All: compileAll, Full: false}); err != nil {
+					t.Fatal(err)
+				}
+				if err := render.CompileJSON(&fBuf, toolCompiles, render.Options{All: compileAll, Full: true}); err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(cBuf.Bytes(), fBuf.Bytes()) {
+					t.Fatalf("Full changed CompileJSON output for All=%v", compileAll)
+				}
+				if bytes.Contains(cBuf.Bytes(), []byte(`\u003c`)) || bytes.Contains(cBuf.Bytes(), []byte(`\u003e`)) || bytes.Contains(cBuf.Bytes(), []byte(`\u0026`)) {
+					t.Fatal("CompileJSON HTML escaping was enabled")
+				}
+			}
+			if len(parts) == 0 {
+				var emptyRaw bytes.Buffer
+				if err := render.JSON(&emptyRaw, results, render.Options{All: true}); err != nil {
+					t.Fatal(err)
+				}
+				if strings.TrimSpace(emptyRaw.String()) != "[]" {
+					t.Fatalf("empty input shape = %q, want []", emptyRaw.String())
+				}
+				var emptyCompile bytes.Buffer
+				if err := render.CompileJSON(&emptyCompile, nil, render.Options{All: all}); err != nil {
+					t.Fatal(err)
+				}
+				if strings.TrimSpace(emptyCompile.String()) != "null" {
+					t.Fatalf("compile empty shape = %q, want null", emptyCompile.String())
+				}
+				var emptyInspect bytes.Buffer
+				if err := render.InspectJSON(&emptyInspect, nil); err != nil {
+					t.Fatal(err)
+				}
+				if strings.TrimSpace(emptyInspect.String()) != "null" {
+					t.Fatalf("inspect empty shape = %q, want null", emptyInspect.String())
+				}
+			}
 		}
 	})
 }

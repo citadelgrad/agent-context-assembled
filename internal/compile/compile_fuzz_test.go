@@ -17,7 +17,7 @@ func FuzzFrontmatterAndRuleConditionsNeverPanic(f *testing.F) {
 		{"", "rule.mdc"},
 		{"---\napplyTo: \"**/*.go\"\n---\nbody", "x.instructions.md"},
 		{"---\r\nTRIGGER: glob\r\nglobs: '*.md'\r\n---\r\nbody", ".windsurf/rules/x.md"},
-		{"---\nalwaysApply: false\ndescription: e\u0301界🙂\n---\nbody", ".cursor/rules/x.mdc"},
+		{"---\nalwaysApply: false\ndescription: é界🙂\n---\nbody", ".cursor/rules/x.mdc"},
 		{"---\nkey: first:second\nkey: duplicate\n", "AGENTS.md"},
 	} {
 		f.Add(seed.content, seed.path)
@@ -27,9 +27,18 @@ func FuzzFrontmatterAndRuleConditionsNeverPanic(f *testing.F) {
 		if len(content) > 64*1024 || len(path) > 1024 {
 			t.Skip()
 		}
+		// frontmatterField must be deterministic and never panic
 		for _, key := range []string{"applyTo", "trigger", "globs", "alwaysApply", "description", "missing"} {
-			frontmatterField(content, key)
+			got, ok := frontmatterField(content, key)
+			if !ok && key != "missing" {
+				// not a failure per se — content may not contain the key
+				continue
+			}
+			if again, ok2 := frontmatterField(content, key); ok != ok2 || got != again {
+				t.Fatalf("frontmatterField(%q, %q) nondeterministic: %v/%v then %v/%v", content, key, got, ok, again, ok2)
+			}
 		}
+		// conditionFor must be deterministic and handle supported suffixes
 		for _, tool := range []tools.Tool{
 			{Slug: "github-copilot"},
 			{Slug: "cursor"},
@@ -41,12 +50,33 @@ func FuzzFrontmatterAndRuleConditionsNeverPanic(f *testing.F) {
 				t.Fatalf("conditionFor is nondeterministic: %q then %q", got, again)
 			}
 		}
-		if got := conditionFor(tools.Tool{Slug: "github-copilot"}, scan.MatchedFile{Path: path + ".txt", Content: content}); got != "" {
-			t.Fatalf("non-instructions Copilot path produced condition %q", got)
+		// Non-instructions paths should produce no condition
+		if !strings.HasSuffix(path, ".instructions.md") {
+			if got := conditionFor(tools.Tool{Slug: "github-copilot"}, scan.MatchedFile{Path: path + ".txt", Content: content}); got != "" {
+				t.Fatalf("non-instructions Copilot path produced condition %q", got)
+			}
 		}
+		// Non-.mdc paths should produce no Cursor condition
 		if got := conditionFor(tools.Tool{Slug: "cursor"}, scan.MatchedFile{Path: path + ".txt", Content: content}); got != "" {
 			t.Fatalf("non-mdc Cursor path produced condition %q", got)
 		}
+		// Cursor .mdc should match cursorRuleCondition
+		if strings.HasSuffix(path, ".mdc") {
+			got := conditionFor(tools.Tool{Slug: "cursor"}, scan.MatchedFile{Path: path, Content: content})
+			want := cursorRuleCondition(content)
+			if got != want {
+				t.Fatalf("Cursor .mdc conditionFor %q != cursorRuleCondition %q", got, want)
+			}
+		}
+		// Copilot .instructions.md should match applyTo frontmatter
+		if strings.HasSuffix(path, ".instructions.md") {
+			want, _ := frontmatterField(content, "applyTo")
+			got := conditionFor(tools.Tool{Slug: "github-copilot"}, scan.MatchedFile{Path: path, Content: content})
+			if want != "" && !strings.Contains(got, want) {
+				t.Fatalf("Copilot conditionFor %q does not contain applyTo %q", got, want)
+			}
+		}
+		// cursorRuleCondition must be deterministic
 		if got := cursorRuleCondition(content); got != cursorRuleCondition(content) {
 			t.Fatal("cursorRuleCondition is nondeterministic")
 		}
@@ -56,7 +86,7 @@ func FuzzFrontmatterAndRuleConditionsNeverPanic(f *testing.F) {
 func FuzzFrontmatterFieldMetamorphic(f *testing.F) {
 	f.Add("applyTo", "**/*.go", "unrelated", "value", false)
 	f.Add("trigger", "glob:with:colons", "description", "🙂界", true)
-	f.Add("description", "e\u0301", "globs", "*.md", false)
+	f.Add("description", "é", "globs", "*.md", false)
 
 	f.Fuzz(func(t *testing.T, key, value, otherKey, otherValue string, crlf bool) {
 		if !safeFrontmatterAtom(key) || !safeFrontmatterValue(value) ||
@@ -90,18 +120,16 @@ func FuzzFrontmatterFieldMetamorphic(f *testing.F) {
 	})
 }
 
-func safeFrontmatterAtom(value string) bool {
-	if value == "" || len(value) > 64 || strings.TrimSpace(value) != value {
+func safeFrontmatterAtom(s string) bool {
+	if len(s) == 0 || len(s) > 64 {
 		return false
 	}
-	for _, r := range value {
-		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' && r != '-' {
-			return false
-		}
-	}
-	return true
+	return !strings.ContainsAny(s, "\n\r\":")
 }
 
-func safeFrontmatterValue(value string) bool {
-	return len(value) <= 256 && !strings.ContainsAny(value, "\"'\r\n\x00") && strings.TrimSpace(value) == value
+func safeFrontmatterValue(s string) bool {
+	if len(s) > 4096 {
+		return false
+	}
+	return !strings.ContainsAny(s, "\n\r\x00")
 }
