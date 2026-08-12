@@ -397,8 +397,11 @@ func aiderReport(absTarget string) Report {
 	llmHistory := filepath.Join(absTarget, ".aider.llm.history")
 	chatHistory := filepath.Join(absTarget, ".aider.chat.history.md")
 
-	if info, err := os.Stat(llmHistory); err == nil {
+	if info, err := os.Stat(llmHistory); err == nil && info.Mode().IsRegular() {
 		content, readErr := os.ReadFile(llmHistory)
+		if readErr != nil {
+			goto chatHistoryFallback
+		}
 		base.Mechanism = MechanismContentConfirmed
 		base.ArtifactPath = llmHistory
 		base.LastModified = info.ModTime()
@@ -407,13 +410,12 @@ func aiderReport(absTarget string) Report {
 			"including role=='system', with no filtering (source: base_coder.py, format_messages() in aider/utils.py). Distinct from .aider.chat.history.md, " +
 			"which is a human-readable reconstructed log that does NOT include the system prompt."
 		base.Confidence = "confirmed: source-verified (aider.chat/docs/config/options.html + base_coder.py/utils.py)"
-		if readErr == nil {
-			base.ExtractedContent = string(content)
-		}
+		base.ExtractedContent = string(content)
 		return base
 	}
 
-	if info, err := os.Stat(chatHistory); err == nil {
+chatHistoryFallback:
+	if info, err := os.Stat(chatHistory); err == nil && info.Mode().IsRegular() {
 		base.Mechanism = MechanismMetadataOnly
 		base.ArtifactPath = chatHistory
 		base.LastModified = info.ModTime()
@@ -530,7 +532,7 @@ func cursorReport(home string) Report {
 			filepath.Join(home, ".config", "Cursor", "User", "globalStorage", "state.vscdb"),
 		}
 		for _, c := range candidates {
-			if info, err := os.Stat(c); err == nil {
+			if info, err := os.Stat(c); err == nil && info.Mode().IsRegular() {
 				base.ArtifactPath = c
 				base.LastModified = info.ModTime()
 				base.Mechanism = MechanismMetadataOnly

@@ -434,6 +434,52 @@ func TestAiderReportLLMHistoryMeansContentConfirmedAndTakesPriority(t *testing.T
 	}
 }
 
+func TestAiderReportRequiresReadableRegularArtifacts(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, path string)
+		mechanism Mechanism
+		content   string
+	}{
+		{name: "absent", setup: func(t *testing.T, path string) {}, mechanism: MechanismDocumentedFlagNotRun},
+		{name: "regular", setup: func(t *testing.T, path string) { mustWriteFile(t, path, "content") }, mechanism: MechanismContentConfirmed, content: "content"},
+		{name: "empty regular", setup: func(t *testing.T, path string) { mustWriteFile(t, path, "") }, mechanism: MechanismContentConfirmed},
+		{name: "directory", setup: func(t *testing.T, path string) { mustMkdirAll(t, path) }, mechanism: MechanismDocumentedFlagNotRun},
+		{name: "symlink to file", setup: func(t *testing.T, path string) {
+			target := filepath.Join(t.TempDir(), "target")
+			mustWriteFile(t, target, "linked")
+			mustMkdirAll(t, filepath.Dir(path))
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
+		}, mechanism: MechanismContentConfirmed, content: "linked"},
+		{name: "symlink to directory", setup: func(t *testing.T, path string) {
+			target := t.TempDir()
+			mustMkdirAll(t, filepath.Dir(path))
+			if err := os.Symlink(target, path); err != nil {
+				t.Fatal(err)
+			}
+		}, mechanism: MechanismDocumentedFlagNotRun},
+		{name: "broken symlink", setup: func(t *testing.T, path string) {
+			mustMkdirAll(t, filepath.Dir(path))
+			if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), path); err != nil {
+				t.Fatal(err)
+			}
+		}, mechanism: MechanismDocumentedFlagNotRun},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := t.TempDir()
+			path := filepath.Join(target, ".aider.llm.history")
+			tt.setup(t, path)
+			r := aiderReport(target)
+			if r.Mechanism != tt.mechanism || r.ExtractedContent != tt.content {
+				t.Fatalf("report mechanism/content = %v/%q, want %v/%q", r.Mechanism, r.ExtractedContent, tt.mechanism, tt.content)
+			}
+		})
+	}
+}
+
 // ---- geminiCLIReport -----------------------------------------------------
 
 func TestGeminiCLIReportNoHomeDataMeansDocumentedFlagNotRun(t *testing.T) {
@@ -556,6 +602,19 @@ func TestCursorReportStateDBPresentMeansMetadataOnly(t *testing.T) {
 	}
 	if r.ArtifactPath != path {
 		t.Errorf("ArtifactPath = %q, want %q", r.ArtifactPath, path)
+	}
+}
+
+func TestCursorReportRejectsDirectoryStateDBAndUsesNextCandidate(t *testing.T) {
+	home := t.TempDir()
+	first := filepath.Join(home, "Library", "Application Support", "Cursor", "User", "globalStorage", "state.vscdb")
+	second := filepath.Join(home, ".config", "Cursor", "User", "globalStorage", "state.vscdb")
+	mustMkdirAll(t, first)
+	mustWriteFile(t, second, "sqlite")
+
+	r := cursorReport(home)
+	if r.Mechanism != MechanismMetadataOnly || r.ArtifactPath != second {
+		t.Fatalf("report = %+v, want second regular candidate %q", r, second)
 	}
 }
 
