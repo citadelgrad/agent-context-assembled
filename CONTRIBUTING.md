@@ -14,7 +14,8 @@ All four must pass before opening a PR; CI runs the same checks.
 ## Fuzz testing
 
 Ordinary `go test ./...` runs only each fuzz target's committed seed corpus, so the required test
-suite stays deterministic. CI runs every approved target separately for 10 seconds on pushes and
+suite stays deterministic. CI verifies its explicit matrix covers every `Fuzz*` target, then runs
+each target separately for 10 seconds on pushes and
 pull requests; the Monday 04:23 UTC schedule extends each target to two minutes. Local mutation
 fuzzing uses the same package/target form:
 

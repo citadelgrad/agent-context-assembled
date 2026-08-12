@@ -34,6 +34,9 @@ jobs:
             exit 1
           fi
 
+      - name: Verify fuzz matrix coverage
+        run: python3 scripts/check-fuzz-matrix.py
+
       - name: Test
         run: go test -race ./...
 
