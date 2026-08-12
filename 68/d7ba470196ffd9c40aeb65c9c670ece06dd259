@@ -1,0 +1,16 @@
+internal/compile/compile.go
+  h_12ee2b2686c122 17,338,349,369,375
+internal/compile/compile_test.go
+  h_12ee2b2686c122 4,9,645-697
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "68d7ba470196ffd9c40aeb65c9c670ece06dd259",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
