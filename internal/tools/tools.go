@@ -33,6 +33,16 @@ const (
 	DownwardEager
 )
 
+// GlobalConfigMode describes how a tool selects among global config candidates.
+type GlobalConfigMode int
+
+const (
+	// GlobalConfigAdditive includes every existing global candidate.
+	GlobalConfigAdditive GlobalConfigMode = iota
+	// GlobalConfigFirstExisting includes only the first existing candidate.
+	GlobalConfigFirstExisting
+)
+
 // LocalFile is one canonical filename or glob pattern this tool looks for in a
 // directory, tagged with a note on how it composes with siblings at the same level.
 type LocalFile struct {
@@ -44,8 +54,8 @@ type LocalFile struct {
 }
 
 // GlobalConfig is a candidate path (relative to $HOME, or absolute) for a tool's
-// user-level config. The first existing candidate in FirstMatchWins mode is used;
-// otherwise all existing candidates are included.
+// user-level config. GlobalConfigMode determines whether candidates stack or
+// act as ordered fallbacks; local FirstMatchWins semantics are independent.
 type GlobalConfig struct {
 	// PathFromHome is joined onto the user's home directory. Mutually exclusive with Absolute.
 	PathFromHome string
@@ -74,6 +84,8 @@ type Tool struct {
 
 	// GlobalConfigs are the tool's global/user-level config file candidates.
 	GlobalConfigs []GlobalConfig
+	// GlobalConfigMode controls whether candidates are additive or fallbacks.
+	GlobalConfigMode GlobalConfigMode
 
 	// PrecedenceNote is a short one-line description of application order, echoed in
 	// output so users don't have to cross-reference docs/research.md while reading results.
@@ -122,7 +134,8 @@ var Registry = []Tool{
 			{PathFromHome: ".codex/AGENTS.override.md", Note: "global override, wins over AGENTS.md if present"},
 			{PathFromHome: ".codex/AGENTS.md", Note: "global instructions"},
 		},
-		PrecedenceNote: "Additive concatenation from git root down to target (root text first); AGENTS.override.md wins over AGENTS.md within the same directory. Codex does not walk above the git root (falls back to target-dir-only if no .git found).",
+		GlobalConfigMode: GlobalConfigFirstExisting,
+		PrecedenceNote:   "Additive concatenation from git root down to target (root text first); AGENTS.override.md wins over AGENTS.md within the same directory. Codex does not walk above the git root (falls back to target-dir-only if no .git found).",
 	},
 	{
 		Name: "GitHub Copilot",
@@ -157,7 +170,8 @@ var Registry = []Tool{
 			{PathFromHome: ".config/opencode/AGENTS.md", Note: "global"},
 			{PathFromHome: ".claude/CLAUDE.md", Note: "Claude-compat global, read when compat mode active"},
 		},
-		PrecedenceNote: "Global file + one nearest project-level match (first ancestor, walking target-to-root, that has AGENTS.md/CLAUDE.md/CONTEXT.md wins; ancestors are NOT stacked). Does not walk above the git root.",
+		GlobalConfigMode: GlobalConfigFirstExisting,
+		PrecedenceNote:   "Global file + one nearest project-level match (first ancestor, walking target-to-root, that has AGENTS.md/CLAUDE.md/CONTEXT.md wins; ancestors are NOT stacked). Does not walk above the git root.",
 	},
 	{
 		Name: "Cursor",

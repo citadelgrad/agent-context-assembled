@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/citadelgrad/agent-context-assembled/internal/tools"
@@ -76,6 +77,33 @@ func TestScanToolPrecedenceModel(t *testing.T) {
 	baseTool.FirstMatchWins = true
 	first := scanTool(baseTool, chain, Options{})
 	assertPaths(t, first.Files, []string{global1, filepath.Join(dirs[2], "first.md")})
+}
+
+func TestCodexGlobalFallbackUsesFirstExistingCandidate(t *testing.T) {
+	home := t.TempDir()
+	target := t.TempDir()
+	for path, content := range map[string]string{
+		filepath.Join(home, ".codex", "AGENTS.override.md"): "override",
+		filepath.Join(home, ".codex", "AGENTS.md"):          "fallback",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var codex tools.Tool
+	for _, tool := range tools.Registry {
+		if tool.Slug == "codex-cli" {
+			codex = tool
+			break
+		}
+	}
+	got := scanTool(codex, Chain{Dirs: []string{target}, GitRootIndex: -1, Home: home}, Options{})
+	if len(got.Files) != 1 || !strings.HasSuffix(got.Files[0].Path, "AGENTS.override.md") {
+		t.Fatalf("Codex globals = %+v, want override only", got.Files)
+	}
 }
 
 func assertPaths(t *testing.T, files []MatchedFile, want []string) {

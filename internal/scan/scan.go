@@ -158,7 +158,7 @@ func scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
 				}
 			}
 		}
-		if t.FirstMatchWins && len(files) > 0 {
+		if (t.FirstMatchWins || t.GlobalConfigMode == tools.GlobalConfigFirstExisting) && len(files) > 0 {
 			break
 		}
 	}
@@ -244,6 +244,7 @@ func scanDownward(t tools.Tool, target string) []MatchedFile {
 	}
 
 	var out []MatchedFile
+	seen := make(map[string]bool)
 	visited := 0
 
 	var walk func(dir string, depth int)
@@ -279,6 +280,9 @@ func scanDownward(t tools.Tool, target string) []MatchedFile {
 			for _, lf := range t.LocalFiles {
 				matches := expandCandidate(filepath.Join(dir, lf.Pattern))
 				for _, m := range matches {
+					if seen[m] {
+						continue
+					}
 					content, ok := readFile(m)
 					if !ok {
 						continue
@@ -288,6 +292,7 @@ func scanDownward(t tools.Tool, target string) []MatchedFile {
 						Content: content,
 						Note:    "subdirectory: " + lf.Note,
 					})
+					seen[m] = true
 				}
 			}
 		}

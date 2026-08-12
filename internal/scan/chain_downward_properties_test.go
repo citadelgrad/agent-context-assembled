@@ -125,3 +125,23 @@ func TestScanDownwardVisitLimitIs500Directories(t *testing.T) {
 		t.Fatalf("got %d files, want 499 under 500-directory visit cap", len(got))
 	}
 }
+
+func TestScanDownwardDeduplicatesOverlappingPatterns(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "nested")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "RULE.md")
+	if err := os.WriteFile(path, []byte("rule"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := tools.Tool{LocalFiles: []tools.LocalFile{
+		{Pattern: "RULE.md", Note: "exact"},
+		{Pattern: "*.md", Note: "glob"},
+	}}
+	got := scanDownward(tool, root)
+	if len(got) != 1 || got[0].Path != path {
+		t.Fatalf("overlapping patterns returned %+v, want one %q", got, path)
+	}
+}
