@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -78,6 +79,12 @@ func FuzzFilterResultsAndReportsPreserveOrder(f *testing.F) {
 				}
 				j++
 			}
+		}
+		if twice := filterResults(gotResults, want); !reflect.DeepEqual(twice, gotResults) {
+			t.Fatal("filterResults is not idempotent")
+		}
+		if twice := filterReports(gotReports, want); !reflect.DeepEqual(twice, gotReports) {
+			t.Fatal("filterReports is not idempotent")
 		}
 		if got := filterResults(results, nil); len(got) != len(results) {
 			t.Fatal("nil result filter changed input")

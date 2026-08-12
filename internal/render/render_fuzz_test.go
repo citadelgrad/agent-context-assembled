@@ -38,6 +38,13 @@ func FuzzJSONRenderingProjectionAndFiltering(f *testing.F) {
 			if err := render.JSON(&buf, results, render.Options{All: all, Full: false}); err != nil {
 				t.Fatal(err)
 			}
+			var fullBuf bytes.Buffer
+			if err := render.JSON(&fullBuf, results, render.Options{All: all, Full: true}); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(buf.Bytes(), fullBuf.Bytes()) {
+				t.Fatal("Full changed JSON output")
+			}
 			var got []struct {
 				Tool  string                                 `json:"tool"`
 				Slug  string                                 `json:"slug"`
@@ -75,6 +82,30 @@ func FuzzJSONRenderingProjectionAndFiltering(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestJSONEmptyOutputShapes(t *testing.T) {
+	var raw bytes.Buffer
+	if err := render.JSON(&raw, nil, render.Options{All: true}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(raw.String()) != "[]" {
+		t.Fatalf("raw nil input = %q, want []", raw.String())
+	}
+	var compiled bytes.Buffer
+	if err := render.CompileJSON(&compiled, nil, render.Options{All: true}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(compiled.String()) != "null" {
+		t.Fatalf("compiled nil input = %q, want null", compiled.String())
+	}
+	var inspected bytes.Buffer
+	if err := render.InspectJSON(&inspected, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(inspected.String()) != "null" {
+		t.Fatalf("inspect nil input = %q, want null", inspected.String())
+	}
 }
 
 func FuzzCompileAndInspectJSONRoundTrip(f *testing.F) {
