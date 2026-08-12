@@ -346,6 +346,18 @@ func TestReadCodexRolloutMissingFileReturnsNotOK(t *testing.T) {
 	}
 }
 
+func TestReadCodexRolloutScannerErrorRejectsPartialState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout-over-limit.jsonl")
+	valid := `{"type":"session_meta","payload":{"cwd":"/partial"}}` + "\n"
+	overLimit := strings.Repeat("x", 16*1024*1024+1) + "\n"
+	mustWriteFile(t, path, valid+overLimit)
+
+	cwd, base, user, ok := readCodexRollout(path)
+	if ok || cwd != "" || base != "" || user != "" {
+		t.Fatalf("scanner error returned partial state cwd=%q base=%q user=%q ok=%v", cwd, base, user, ok)
+	}
+}
+
 // ---- openCodeReport ------------------------------------------------------
 
 func TestOpenCodeReportNoHomeInfoStillDocumentedFlagNotRun(t *testing.T) {

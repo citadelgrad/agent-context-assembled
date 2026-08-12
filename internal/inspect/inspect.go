@@ -19,6 +19,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -314,8 +315,11 @@ func readCodexRollout(path string) (cwd, baseInstructions, userInstructions stri
 		return "", "", "", false
 	}
 	defer f.Close()
+	return readCodexRolloutReader(f)
+}
 
-	scanner := bufio.NewScanner(f)
+func readCodexRolloutReader(r io.Reader) (cwd, baseInstructions, userInstructions string, ok bool) {
+	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -348,6 +352,9 @@ func readCodexRollout(path string) (cwd, baseInstructions, userInstructions stri
 				}
 			}
 		}
+	}
+	if scanner.Err() != nil {
+		return "", "", "", false
 	}
 	return cwd, baseInstructions, userInstructions, cwd != ""
 }
