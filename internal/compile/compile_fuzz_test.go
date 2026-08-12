@@ -35,9 +35,21 @@ func FuzzFrontmatterAndRuleConditionsNeverPanic(f *testing.F) {
 			{Slug: "cursor"},
 			{Slug: "windsurf"},
 		} {
-			conditionFor(tool, scan.MatchedFile{Path: path, Content: content})
+			file := scan.MatchedFile{Path: path, Content: content}
+			got := conditionFor(tool, file)
+			if again := conditionFor(tool, file); again != got {
+				t.Fatalf("conditionFor is nondeterministic: %q then %q", got, again)
+			}
 		}
-		cursorRuleCondition(content)
+		if got := conditionFor(tools.Tool{Slug: "github-copilot"}, scan.MatchedFile{Path: path + ".txt", Content: content}); got != "" {
+			t.Fatalf("non-instructions Copilot path produced condition %q", got)
+		}
+		if got := conditionFor(tools.Tool{Slug: "cursor"}, scan.MatchedFile{Path: path + ".txt", Content: content}); got != "" {
+			t.Fatalf("non-mdc Cursor path produced condition %q", got)
+		}
+		if got := cursorRuleCondition(content); got != cursorRuleCondition(content) {
+			t.Fatal("cursorRuleCondition is nondeterministic")
+		}
 	})
 }
 

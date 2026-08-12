@@ -63,6 +63,8 @@ jobs:
           - package: ./internal/scan
             target: FuzzExpandCandidateFilesystemInvariants
           - package: ./internal/scan
+            target: FuzzExpandCandidateArbitraryBoundedPatternNeverPanics
+          - package: ./internal/scan
             target: FuzzScopedDirsModel
     steps:
       - uses: actions/checkout@v4

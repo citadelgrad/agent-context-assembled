@@ -86,11 +86,11 @@ func FuzzFilterResultsAndReportsPreserveOrder(f *testing.F) {
 		if twice := filterReports(gotReports, want); !reflect.DeepEqual(twice, gotReports) {
 			t.Fatal("filterReports is not idempotent")
 		}
-		if got := filterResults(results, nil); len(got) != len(results) {
-			t.Fatal("nil result filter changed input")
+		if got := filterResults(results, nil); !reflect.DeepEqual(got, results) {
+			t.Fatal("nil result filter changed values or order")
 		}
-		if got := filterReports(reports, nil); len(got) != len(reports) {
-			t.Fatal("nil report filter changed input")
+		if got := filterReports(reports, nil); !reflect.DeepEqual(got, reports) {
+			t.Fatal("nil report filter changed values or order")
 		}
 	})
 }

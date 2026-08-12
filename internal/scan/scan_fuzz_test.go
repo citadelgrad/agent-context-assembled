@@ -83,6 +83,24 @@ func FuzzExpandCandidateFilesystemInvariants(f *testing.F) {
 	})
 }
 
+func FuzzExpandCandidateArbitraryBoundedPatternNeverPanics(f *testing.F) {
+	for _, seed := range []string{"", "*", "**", "[", "{a,b}", "🙂?.md"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, pattern string) {
+		if len(pattern) > 256 || strings.ContainsAny(pattern, "/\\\x00") || filepath.VolumeName(pattern) != "" {
+			t.Skip()
+		}
+		root := t.TempDir()
+		for _, match := range expandCandidate(filepath.Join(root, pattern)) {
+			rel, err := filepath.Rel(root, match)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				t.Fatalf("pattern %q escaped root via %q", pattern, match)
+			}
+		}
+	})
+}
+
 func safePathSegment(value string) bool {
 	if value == "" || len(value) > 32 || value == "." || value == ".." || filepath.IsAbs(value) || filepath.VolumeName(value) != "" {
 		return false
