@@ -27,7 +27,12 @@ func FuzzReadCodexRolloutStateMachine(f *testing.F) {
 				cwd, base, user, ok, wantCWD, wantBase, wantUser, wantCWD != "", operations)
 		}
 
-		neutral := "not json\n{\"type\":\"unknown\",\"payload\":{}}\n\n" + content
+		lines := strings.Split(content, "\n")
+		insertAt := len(lines) / 2
+		lines = append(lines, "")
+		copy(lines[insertAt+1:], lines[insertAt:])
+		lines[insertAt] = `{"type":"unknown","payload":{}}`
+		neutral := strings.Join(lines, "\n")
 		neutralCWD, neutralBase, neutralUser, neutralOK := readCodexRolloutReader(strings.NewReader(neutral))
 		if neutralCWD != cwd || neutralBase != base || neutralUser != user || neutralOK != ok {
 			t.Fatal("inserting irrelevant records changed accumulated state")
@@ -59,9 +64,16 @@ func codexRolloutFixture(operations []byte) (content, cwd, base, user string) {
 		case 5:
 			lines = append(lines, `{"type":"session_meta","payload":"malformed-payload"}`)
 		case 6:
-			lines = append(lines, rolloutRecord("turn_context", map[string]any{
-				"cwd": "", "user_instructions": "",
-			}))
+			if operation&0x80 != 0 {
+				lines = append(lines, rolloutRecord("session_meta", map[string]any{
+					"cwd": value, "base_instructions": map[string]any{"text": ""},
+				}))
+				cwd = value
+			} else {
+				lines = append(lines, rolloutRecord("turn_context", map[string]any{
+					"cwd": "", "user_instructions": "",
+				}))
+			}
 		}
 	}
 	return strings.Join(lines, "\n") + "\n", cwd, base, user

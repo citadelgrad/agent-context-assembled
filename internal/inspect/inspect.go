@@ -341,7 +341,7 @@ func readCodexRolloutReader(r io.Reader) (cwd, baseInstructions, userInstruction
 				if p.CWD != "" {
 					cwd = p.CWD
 				}
-				if p.BaseInstructions != nil {
+				if p.BaseInstructions != nil && p.BaseInstructions.Text != "" {
 					baseInstructions = p.BaseInstructions.Text
 				}
 			}

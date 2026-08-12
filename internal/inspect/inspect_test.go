@@ -358,6 +358,21 @@ func TestReadCodexRolloutScannerErrorRejectsPartialState(t *testing.T) {
 	}
 }
 
+func TestReadCodexRolloutEmptyBaseDoesNotReplaceLastNonEmptyBase(t *testing.T) {
+	content := strings.Join([]string{
+		rolloutRecord("session_meta", map[string]any{
+			"cwd": "/project", "base_instructions": map[string]any{"text": "keep this"},
+		}),
+		rolloutRecord("session_meta", map[string]any{
+			"cwd": "/project", "base_instructions": map[string]any{"text": ""},
+		}),
+	}, "\n")
+	_, base, _, ok := readCodexRolloutReader(strings.NewReader(content))
+	if !ok || base != "keep this" {
+		t.Fatalf("base=%q ok=%v, want last non-empty base preserved", base, ok)
+	}
+}
+
 // ---- openCodeReport ------------------------------------------------------
 
 func TestOpenCodeReportNoHomeInfoStillDocumentedFlagNotRun(t *testing.T) {
