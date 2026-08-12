@@ -1,0 +1,16 @@
+internal/inspect/codex_discovery_properties_test.go
+  h_12ee2b2686c122 1-59
+internal/inspect/inspect.go
+  h_12ee2b2686c122 223-224,243-246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "6d107fabd69272b0eb625010299fe68437f43c37",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
