@@ -1,10 +1,12 @@
 package compile_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/citadelgrad/agent-context-assembled/internal/compile"
 	"github.com/citadelgrad/agent-context-assembled/internal/scan"
@@ -638,5 +640,58 @@ func TestWindsurfLimitChecksMultipleFilesProduceMultipleChecks(t *testing.T) {
 	out := compile.Run(results)
 	if len(out[0].LimitChecks) != 3 {
 		t.Fatalf("got %d LimitChecks, want 3 (one per matching file)", len(out[0].LimitChecks))
+	}
+}
+
+func TestCharacterLimitChecksMeasureUnicodeCodePoints(t *testing.T) {
+	tests := []struct {
+		slug  string
+		path  string
+		note  string
+		limit int
+	}{
+		{slug: "windsurf", path: "/home/user/.codeium/windsurf/memories/global_rules.md", note: "global: global", limit: 6000},
+		{slug: "windsurf", path: "/repo/.windsurf/rules/x.md", note: "target dir: rule", limit: 12000},
+		{slug: "hermes", path: "/repo/.hermes.md", note: "target dir: primary", limit: 20000},
+	}
+	forms := []string{"a", "🙂", "界", "e\u0301"}
+
+	for _, tt := range tests {
+		for _, delta := range []int{-1, 0, 1} {
+			for _, form := range forms {
+				name := fmt.Sprintf("%s_%d_%x", tt.slug, delta, []byte(form))
+				t.Run(name, func(t *testing.T) {
+					wantMeasured := tt.limit + delta
+					content := strings.Repeat(form, wantMeasured/utf8.RuneCountInString(form))
+					content += strings.Repeat("a", wantMeasured-utf8.RuneCountInString(content))
+					files := []scan.MatchedFile{{Path: tt.path, Content: content, Note: tt.note}}
+					out := compile.Run([]scan.ToolResult{result(t, tt.slug, files...)})
+					if len(out[0].LimitChecks) != 1 {
+						t.Fatalf("got %d checks, want 1", len(out[0].LimitChecks))
+					}
+					check := out[0].LimitChecks[0]
+					if check.Measured != wantMeasured {
+						t.Errorf("Measured = %d, want %d Unicode code points", check.Measured, wantMeasured)
+					}
+					if check.Exceeds != (wantMeasured > tt.limit) {
+						t.Errorf("Exceeds = %v, want %v", check.Exceeds, wantMeasured > tt.limit)
+					}
+					if check.Unit != "characters" {
+						t.Errorf("Unit = %q, want characters", check.Unit)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestCodexLimitCheckRemainsByteBasedForUnicode(t *testing.T) {
+	content := strings.Repeat("🙂", 8193)
+	out := compile.Run([]scan.ToolResult{result(t, "codex-cli", scan.MatchedFile{
+		Path: "/repo/AGENTS.md", Content: content, Note: "target dir: primary",
+	})})
+	check := out[0].LimitChecks[0]
+	if check.Measured != len(content) || check.Unit != "bytes" || !check.Exceeds {
+		t.Fatalf("Codex check = %+v, want %d bytes exceeding 32 KiB", check, len(content))
 	}
 }

@@ -14,6 +14,7 @@ package compile
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/citadelgrad/agent-context-assembled/internal/scan"
 	"github.com/citadelgrad/agent-context-assembled/internal/tools"
@@ -334,7 +335,7 @@ func windsurfLimitChecks(r scan.ToolResult) []LimitCheck {
 	var checks []LimitCheck
 	for _, f := range r.Files {
 		if strings.HasPrefix(f.Note, "global:") && strings.Contains(f.Path, "global_rules.md") {
-			measured := len(f.Content)
+			measured := utf8.RuneCountInString(f.Content)
 			checks = append(checks, LimitCheck{
 				Documented:  true,
 				Description: fmt.Sprintf("Windsurf global_rules.md character cap (%s)", f.Path),
@@ -345,7 +346,7 @@ func windsurfLimitChecks(r scan.ToolResult) []LimitCheck {
 				Confidence:  "3-of-4 secondary sources agree (no primary source available post-rebrand)",
 			})
 		} else if strings.HasSuffix(f.Path, ".md") && (strings.Contains(f.Path, "/.windsurf/rules/") || strings.Contains(f.Path, "/.devin/rules/")) {
-			measured := len(f.Content)
+			measured := utf8.RuneCountInString(f.Content)
 			checks = append(checks, LimitCheck{
 				Documented:  true,
 				Description: fmt.Sprintf("Windsurf per-file rules character cap (%s)", f.Path),
@@ -365,13 +366,13 @@ func windsurfLimitChecks(r scan.ToolResult) []LimitCheck {
 // independently (not a shared budget) to every file it names: SOUL.md,
 // .hermes.md, AGENTS.md, CLAUDE.md, and .cursorrules. Docs confirm head/tail
 // truncation applies but do not publish the exact split, so this check only
-// tests against the documented default byte count.
+// tests against the documented default character count.
 const hermesContextFileMaxChars = 20000
 
 func hermesLimitChecks(r scan.ToolResult) []LimitCheck {
 	var checks []LimitCheck
 	for _, f := range r.Files {
-		measured := len(f.Content)
+		measured := utf8.RuneCountInString(f.Content)
 		checks = append(checks, LimitCheck{
 			Documented:  true,
 			Description: fmt.Sprintf("Hermes context_file_max_chars default, applied independently per file (%s)", f.Path),
