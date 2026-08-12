@@ -1,0 +1,14 @@
+internal/compile/compile_properties_test.go
+  h_12ee2b2686c122 1-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "6d1dc33e0118786d75cf9bfdd2f025aa24646394",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
