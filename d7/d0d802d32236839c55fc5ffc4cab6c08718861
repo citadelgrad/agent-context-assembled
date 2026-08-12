@@ -1,0 +1,19 @@
+internal/render/render_test.go
+  s_5bd9e54de6f8ab::t_1e7f684f5ea63e 6,10,244-257,470-480,623-646
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "d7d0d802d32236839c55fc5ffc4cab6c08718861",
+  "prompts": {},
+  "sessions": {
+    "s_5bd9e54de6f8ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e9e22db2-e66c-400e-acce-56efa14b7fc0",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
