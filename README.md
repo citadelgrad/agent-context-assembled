@@ -7,6 +7,8 @@ Shows the **full compiled set** of AI coding-agent instruction files that actual
 given directory — across every major AI coding agent (Claude Code, Codex CLI, GitHub Copilot,
 OpenCode, Cursor, Windsurf, Cline, Aider, Gemini CLI) — not just one tool.
 
+![actx assembles scattered instruction files into the ordered context each AI coding agent actually sees](docs/assets/actx-overview.svg)
+
 Every AI coding agent has its own file(s) it reads for persistent instructions (`CLAUDE.md`,
 `AGENTS.md`, `.cursor/rules/*.mdc`, `.clinerules/`, ...), its own rule for how far up the
 directory tree it walks, its own global/user-level config location, and its own precedence order
