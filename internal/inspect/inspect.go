@@ -220,7 +220,8 @@ func codexCLIReport(home, absTarget string) Report {
 		if err != nil {
 			return nil //nolint:nilerr // best-effort walk; skip unreadable entries
 		}
-		if !d.IsDir() && strings.HasSuffix(d.Name(), ".jsonl") && strings.HasPrefix(d.Name(), "rollout-") {
+		info, infoErr := d.Info()
+		if infoErr == nil && info.Mode().IsRegular() && strings.HasSuffix(d.Name(), ".jsonl") && strings.HasPrefix(d.Name(), "rollout-") {
 			candidates = append(candidates, path)
 		}
 		return nil
@@ -239,7 +240,10 @@ func codexCLIReport(home, absTarget string) Report {
 		ii, ei := os.Stat(candidates[i])
 		jj, ej := os.Stat(candidates[j])
 		if ei != nil || ej != nil {
-			return false
+			return candidates[i] < candidates[j]
+		}
+		if ii.ModTime().Equal(jj.ModTime()) {
+			return candidates[i] < candidates[j]
 		}
 		return ii.ModTime().After(jj.ModTime())
 	})
