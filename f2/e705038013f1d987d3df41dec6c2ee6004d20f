@@ -1,0 +1,16 @@
+internal/inspect/artifact_properties_test.go
+  h_12ee2b2686c122 1-81
+internal/inspect/inspect.go
+  h_12ee2b2686c122 475-479,613,615-619,622-624,627,629,653,655-659,662-664,667,669
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "f2e705038013f1d987d3df41dec6c2ee6004d20f",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
