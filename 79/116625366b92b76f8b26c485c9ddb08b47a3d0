@@ -1,0 +1,16 @@
+.github/workflows/ci.yml
+  h_12ee2b2686c122 86,90-95
+internal/compile/compile_fuzz_test.go
+  h_12ee2b2686c122 124,127-132,139-141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "79116625366b92b76f8b26c485c9ddb08b47a3d0",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
