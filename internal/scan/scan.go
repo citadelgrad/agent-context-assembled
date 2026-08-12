@@ -248,7 +248,7 @@ func scanDownward(t tools.Tool, target string) []MatchedFile {
 
 	var walk func(dir string, depth int)
 	walk = func(dir string, depth int) {
-		if depth > maxDepth || visited > maxDirsVisited {
+		if depth > maxDepth || visited >= maxDirsVisited {
 			return
 		}
 		entries, err := os.ReadDir(dir)
