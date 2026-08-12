@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -292,6 +293,37 @@ func TestRunMaxCharsWritesOverflowNoticeInJSONMode(t *testing.T) {
 	var full []map[string]any
 	if err := json.Unmarshal(content, &full); err != nil {
 		t.Fatalf("overflow file is not the full valid JSON output: %v\nbody: %s", err, content)
+	}
+}
+
+func TestRunMaxCharsWritesOverflowToConfiguredOutputFile(t *testing.T) {
+	isolateHome(t)
+	dir := t.TempDir()
+	mustWriteFile(t, filepath.Join(dir, "CLAUDE.md"), "this content is long enough to exceed a tiny max-chars cap")
+	outputPath := filepath.Join(t.TempDir(), "full-output.txt")
+
+	var buf bytes.Buffer
+	if err := run([]string{"--max-chars=50", "--out=" + outputPath, dir}, &buf); err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	if got := extractOverflowFilePath(t, buf.String()); got != outputPath {
+		t.Fatalf("overflow path = %q, want configured path %q", got, outputPath)
+	}
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("reading configured output file %s: %v", outputPath, err)
+	}
+	if !strings.Contains(string(content), "this content is long enough") {
+		t.Errorf("expected configured output file to contain full output, got:\n%s", content)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(outputPath)
+		if err != nil {
+			t.Fatalf("stat configured output file %s: %v", outputPath, err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("configured output file permissions = %04o, want 0600", got)
+		}
 	}
 }
 

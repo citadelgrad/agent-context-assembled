@@ -45,11 +45,12 @@ type outputOverflow struct {
 // writeSizeGuarded renders into an in-memory buffer first so the total output
 // size can be checked before any of it reaches w. Output at or under maxChars
 // (or when maxChars <= 0) passes through unchanged. Oversized output is
-// instead spilled to a temp file, with a short notice written to w in its
+// instead spilled to outputPath when configured, or a temp file otherwise,
+// with a short notice written to w in its
 // place -- structured JSON in --json mode (so output stays valid, parseable
 // JSON even when oversized), or a short plain-text notice otherwise -- so a
 // large scan can never silently fill a caller's context window.
-func writeSizeGuarded(w io.Writer, maxChars int, jsonMode bool, render func(buf *bytes.Buffer) error) error {
+func writeSizeGuarded(w io.Writer, maxChars int, jsonMode bool, outputPath string, render func(buf *bytes.Buffer) error) error {
 	var buf bytes.Buffer
 	if err := render(&buf); err != nil {
 		return err
@@ -63,9 +64,15 @@ func writeSizeGuarded(w io.Writer, maxChars int, jsonMode bool, render func(buf 
 	if jsonMode {
 		ext = ".json"
 	}
-	f, err := os.CreateTemp("", "actx-output-*"+ext)
+	var f *os.File
+	var err error
+	if outputPath != "" {
+		f, err = os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	} else {
+		f, err = os.CreateTemp("", "actx-output-*"+ext)
+	}
 	if err != nil {
-		return fmt.Errorf("output exceeded %d chars but could not write overflow file: %w", maxChars, err)
+		return fmt.Errorf("output exceeded %d chars but could not create overflow file: %w", maxChars, err)
 	}
 	defer f.Close()
 	if _, err := f.Write(buf.Bytes()); err != nil {
@@ -172,7 +179,8 @@ func run(args []string, w io.Writer) error {
 	compileMode := fs.Bool("compile", false, "show the assembled 'effective compiled context' per tool instead of the raw file list")
 	liveMode := fs.Bool("live", false, "best-effort runtime introspection: look for real session artifacts showing what a tool actually loaded (see docs/research.md)")
 	toolFilter := fs.String("tool", "", "comma-separated tool slugs to include, e.g. claude-code,codex-cli (default: all supported tools); pass 'list' to print valid slugs and exit")
-	maxChars := fs.Int("max-chars", defaultMaxChars, "safety cap on total output size in characters; output over this is written to a temp file with a short notice in its place instead of stdout (0 disables the cap)")
+	maxChars := fs.Int("max-chars", defaultMaxChars, "safety cap on total output size in characters; output over this is written to a file with a short notice in its place instead of stdout (0 disables the cap)")
+	outputPath := fs.String("out", "", "write output exceeding --max-chars to this persistent file instead of an OS-managed temp file")
 	showVersion := fs.Bool("version", false, "print version and exit")
 	fs.SetOutput(io.Discard) // suppress the flag package's own auto error line (e.g. "flag provided but not defined"); fs.Usage below prints ours to stderr directly
 	fs.Usage = func() {
@@ -202,7 +210,7 @@ func run(args []string, w io.Writer) error {
 		fmt.Fprintln(os.Stderr, "  - On failure, errors go to stderr; under --json they're a JSON object {\"error\": \"...\"}")
 		fmt.Fprintln(os.Stderr, "    instead of plain text. Exit codes: 0 success, 1 runtime error, 2 usage error.")
 		fmt.Fprintln(os.Stderr, "  - Every tool has a stable 'slug' field in JSON output; use --tool to filter by it.")
-		fmt.Fprintf(os.Stderr, "  - Output over --max-chars (default %d, ~%d tokens) is redirected to a temp file with a\n", defaultMaxChars, defaultMaxChars/4)
+		fmt.Fprintf(os.Stderr, "  - Output over --max-chars (default %d, ~%d tokens) is redirected to a file with a\n", defaultMaxChars, defaultMaxChars/4)
 		fmt.Fprintln(os.Stderr, "    short notice in its place, so a large scan can't fill an agent's context window unbounded.")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Flags:")
@@ -278,11 +286,11 @@ func run(args []string, w io.Writer) error {
 	if *liveMode {
 		reports := filterReports(inspect.Run(target), wantSlugs)
 		if *jsonOut {
-			return writeSizeGuarded(w, *maxChars, true, func(buf *bytes.Buffer) error {
+			return writeSizeGuarded(w, *maxChars, true, *outputPath, func(buf *bytes.Buffer) error {
 				return render.InspectJSON(buf, reports)
 			})
 		}
-		return writeSizeGuarded(w, *maxChars, false, func(buf *bytes.Buffer) error {
+		return writeSizeGuarded(w, *maxChars, false, *outputPath, func(buf *bytes.Buffer) error {
 			render.InspectText(buf, reports, *full)
 			return nil
 		})
@@ -297,22 +305,22 @@ func run(args []string, w io.Writer) error {
 	if *compileMode {
 		compiled := compile.Run(results)
 		if *jsonOut {
-			return writeSizeGuarded(w, *maxChars, true, func(buf *bytes.Buffer) error {
+			return writeSizeGuarded(w, *maxChars, true, *outputPath, func(buf *bytes.Buffer) error {
 				return render.CompileJSON(buf, compiled, renderOpts)
 			})
 		}
-		return writeSizeGuarded(w, *maxChars, false, func(buf *bytes.Buffer) error {
+		return writeSizeGuarded(w, *maxChars, false, *outputPath, func(buf *bytes.Buffer) error {
 			render.CompileText(buf, compiled, chain, renderOpts)
 			return nil
 		})
 	}
 
 	if *jsonOut {
-		return writeSizeGuarded(w, *maxChars, true, func(buf *bytes.Buffer) error {
+		return writeSizeGuarded(w, *maxChars, true, *outputPath, func(buf *bytes.Buffer) error {
 			return render.JSON(buf, results, renderOpts)
 		})
 	}
-	return writeSizeGuarded(w, *maxChars, false, func(buf *bytes.Buffer) error {
+	return writeSizeGuarded(w, *maxChars, false, *outputPath, func(buf *bytes.Buffer) error {
 		render.Text(buf, results, chain, renderOpts)
 		return nil
 	})

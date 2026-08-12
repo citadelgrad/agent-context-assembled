@@ -85,6 +85,11 @@ Flags:
   scan can't silently fill a calling agent's context window. This is an actx-side default, not a
   claim about any tool's own limit (compare the sourced, documented limits under `LimitChecks` in
   `--compile` output). Pass `--max-chars=0` to disable the cap and always print full output.
+- `--out` — when output exceeds `--max-chars`, write the full output to this caller-chosen,
+  persistent path instead of an OS-managed temp file. Without `--out`, overflow files are
+  intentionally left in the OS temp directory for the OS to clean up; actx cannot safely remove
+  them because callers may need to read them after the process exits. New `--out` files are created
+  with owner-only permissions; existing files retain their current permissions.
 
 ### Agent/scripting notes
 
