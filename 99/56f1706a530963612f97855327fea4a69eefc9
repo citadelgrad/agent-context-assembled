@@ -1,0 +1,14 @@
+README.md
+  h_12ee2b2686c122 82-84,193-194,285-323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "9956f1706a530963612f97855327fea4a69eefc9",
+  "prompts": {},
+  "humans": {
+    "h_12ee2b2686c122": {
+      "author": "Scott Nixon <citadelgrad@gmail.com>"
+    }
+  }
+}
