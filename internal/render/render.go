@@ -91,9 +91,9 @@ func JSON(w io.Writer, results []scan.ToolResult, opts Options) error {
 // Text writes a readable, grouped-by-tool terminal view.
 func Text(w io.Writer, results []scan.ToolResult, chain scan.Chain, opts Options) {
 	target := chain.Dirs[len(chain.Dirs)-1]
-	fmt.Fprintf(w, "Compiled AI agent instructions for: %s\n", target)
+	fmt.Fprintf(w, "Compiled AI agent instructions for: %s\n", SafeText(target))
 	if chain.GitRootIndex >= 0 {
-		fmt.Fprintf(w, "Detected repo root (.git): %s\n", chain.Dirs[chain.GitRootIndex])
+		fmt.Fprintf(w, "Detected repo root (.git): %s\n", SafeText(chain.Dirs[chain.GitRootIndex]))
 	} else {
 		fmt.Fprintln(w, "Detected repo root (.git): none found")
 	}
@@ -106,10 +106,10 @@ func Text(w io.Writer, results []scan.ToolResult, chain scan.Chain, opts Options
 		}
 		shown++
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "## %s\n", r.Tool.Name)
-		fmt.Fprintf(w, "%s\n", r.Tool.PrecedenceNote)
+		fmt.Fprintf(w, "## %s\n", SafeText(r.Tool.Name))
+		fmt.Fprintf(w, "%s\n", SafeText(r.Tool.PrecedenceNote))
 		for _, n := range r.Tool.NonFileNotes {
-			fmt.Fprintf(w, "  (not scanned: %s)\n", n)
+			fmt.Fprintf(w, "  (not scanned: %s)\n", SafeText(n))
 		}
 		if len(r.Files) == 0 {
 			fmt.Fprintln(w, "  (no contributing files found)")
@@ -117,13 +117,14 @@ func Text(w io.Writer, results []scan.ToolResult, chain scan.Chain, opts Options
 		}
 		fmt.Fprintln(w)
 		for i, f := range r.Files {
-			fmt.Fprintf(w, "--- [%d/%d] %s\n", i+1, len(r.Files), f.Path)
-			fmt.Fprintf(w, "    %s\n", f.Note)
+			fmt.Fprintf(w, "--- [%d/%d] %s\n", i+1, len(r.Files), SafeText(f.Path))
+			fmt.Fprintf(w, "    %s\n", SafeText(f.Note))
 			body := f.Content
 			truncated := false
 			if !opts.Full {
 				body, truncated = truncatePreview(body, previewLimit)
 			}
+			body = SafeText(body)
 			if strings.TrimSpace(body) == "" {
 				fmt.Fprintln(w, "    (empty file)")
 			} else {
@@ -168,7 +169,7 @@ func CompileJSON(w io.Writer, results []compile.ToolCompile, opts Options) error
 // documented-limit check results.
 func CompileText(w io.Writer, results []compile.ToolCompile, chain scan.Chain, opts Options) {
 	target := chain.Dirs[len(chain.Dirs)-1]
-	fmt.Fprintf(w, "Compiled context preview for: %s\n", target)
+	fmt.Fprintf(w, "Compiled context preview for: %s\n", SafeText(target))
 	fmt.Fprintln(w, "(This assembles matched files in each tool's real merge order. It approximates what a tool")
 	fmt.Fprintln(w, "would load, built purely from on-disk files -- it is not a byte-for-byte simulation of the")
 	fmt.Fprintln(w, "tool's own internal prompt assembly. Token counts are len(content)/4 estimates, not exact.)")
@@ -181,10 +182,10 @@ func CompileText(w io.Writer, results []compile.ToolCompile, chain scan.Chain, o
 		}
 		shown++
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "## %s\n", r.Tool)
-		fmt.Fprintf(w, "Merge model: %s\n", r.MergeModel)
+		fmt.Fprintf(w, "## %s\n", SafeText(r.Tool))
+		fmt.Fprintf(w, "Merge model: %s\n", SafeText(r.MergeModel))
 		if r.PrecedenceNote != "" {
-			fmt.Fprintf(w, "%s\n", r.PrecedenceNote)
+			fmt.Fprintf(w, "%s\n", SafeText(r.PrecedenceNote))
 		}
 		if r.Empty {
 			fmt.Fprintln(w, "  (no contributing files -- nothing to compile)")
@@ -205,7 +206,7 @@ func CompileText(w io.Writer, results []compile.ToolCompile, chain scan.Chain, o
 			body, truncated = truncatePreview(body, limit)
 		}
 		for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
-			fmt.Fprintf(w, "%s\n", line)
+			fmt.Fprintf(w, "%s\n", SafeText(line))
 		}
 		if truncated {
 			fmt.Fprintln(w, "... (truncated, use --full for complete assembled content)")
@@ -219,7 +220,7 @@ func CompileText(w io.Writer, results []compile.ToolCompile, chain scan.Chain, o
 				status = "EXCEEDS documented limit"
 			}
 			fmt.Fprintf(w, "Limit check [%s]: %d/%d %s -- %s (confidence: %s)\n",
-				status, lc.Measured, lc.LimitValue, lc.Unit, lc.Description, lc.Confidence)
+				status, lc.Measured, lc.LimitValue, SafeText(lc.Unit), SafeText(lc.Description), SafeText(lc.Confidence))
 		}
 	}
 
@@ -246,10 +247,10 @@ func InspectText(w io.Writer, reports []inspect.Report, full bool) {
 	fmt.Fprintln(w, strings.Repeat("=", 72))
 	for _, r := range reports {
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "## %s [%s]\n", r.Tool, r.Mechanism)
-		fmt.Fprintf(w, "%s\n", r.Summary)
+		fmt.Fprintf(w, "## %s [%s]\n", SafeText(r.Tool), SafeText(string(r.Mechanism)))
+		fmt.Fprintf(w, "%s\n", SafeText(r.Summary))
 		if r.ArtifactPath != "" {
-			fmt.Fprintf(w, "  artifact: %s\n", r.ArtifactPath)
+			fmt.Fprintf(w, "  artifact: %s\n", SafeText(r.ArtifactPath))
 		}
 		if r.ArtifactCount > 0 {
 			fmt.Fprintf(w, "  count: %d\n", r.ArtifactCount)
@@ -258,10 +259,10 @@ func InspectText(w io.Writer, reports []inspect.Report, full bool) {
 			fmt.Fprintf(w, "  last modified: %s\n", r.LastModified.Format("2006-01-02T15:04:05Z07:00"))
 		}
 		if r.Detail != "" {
-			fmt.Fprintf(w, "  detail: %s\n", r.Detail)
+			fmt.Fprintf(w, "  detail: %s\n", SafeText(r.Detail))
 		}
 		if r.Confidence != "" {
-			fmt.Fprintf(w, "  confidence: %s\n", r.Confidence)
+			fmt.Fprintf(w, "  confidence: %s\n", SafeText(r.Confidence))
 		}
 		if r.ExtractedContent != "" {
 			fmt.Fprintln(w, "  --- extracted content ---")
@@ -271,7 +272,7 @@ func InspectText(w io.Writer, reports []inspect.Report, full bool) {
 				body, truncated = truncatePreview(body, previewLimit)
 			}
 			for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
-				fmt.Fprintf(w, "  %s\n", line)
+				fmt.Fprintf(w, "  %s\n", SafeText(line))
 			}
 			if truncated {
 				fmt.Fprintln(w, "  ... (truncated, use --full for complete content)")

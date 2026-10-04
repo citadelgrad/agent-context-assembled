@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/citadelgrad/agent-context-assembled/internal/budget"
+	"github.com/citadelgrad/agent-context-assembled/internal/fileio"
 	"github.com/citadelgrad/agent-context-assembled/internal/tools"
 )
 
@@ -27,9 +29,13 @@ type ToolResult struct {
 	Files []MatchedFile
 }
 
-// Options controls how scanning behaves. Reserved for future scan-time knobs;
+// Options controls how scanning behaves;
 // display-only concerns (like preview truncation) live in the render package instead.
-type Options struct{}
+type Options struct {
+	// ToolSlugs selects tools before any of their files are scanned.
+	// Nil means all tools; an empty non-nil map means none. Only true values select.
+	ToolSlugs map[string]bool
+}
 
 // Chain describes the resolved ancestor chain for a target directory.
 type Chain struct {
@@ -119,35 +125,53 @@ func scopedDirs(c Chain, t tools.Tool) []string {
 	}
 }
 
-// Run performs the full scan for one target directory across every known tool.
+// Run scans selected tools in registry order with one shared budget.Defaults
+// input policy. Exhaustion returns an actionable error and no partial results.
 func Run(target string, opts Options) ([]ToolResult, Chain, error) {
+	return runWithBudget(target, opts, budget.Limits{})
+}
+
+func runWithBudget(target string, opts Options, limits budget.Limits) ([]ToolResult, Chain, error) {
 	chain, err := BuildChain(target)
 	if err != nil {
 		return nil, Chain{}, err
 	}
 
+	s := &scanner{budget: budget.New(limits)}
 	results := make([]ToolResult, 0, len(tools.Registry))
 	for _, t := range tools.Registry {
-		results = append(results, scanTool(t, chain, opts))
+		if opts.ToolSlugs != nil && !opts.ToolSlugs[t.Slug] {
+			continue
+		}
+		results = append(results, s.scanTool(t, chain, opts))
+		if s.budget.Err() != nil {
+			return nil, chain, s.budget.Err()
+		}
 	}
 	return results, chain, nil
 }
 
+type scanner struct{ budget *budget.Budget }
+
 func scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
+	return (&scanner{budget: budget.New(budget.Limits{})}).scanTool(t, chain, opts)
+}
+
+func (s *scanner) scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
 	var files []MatchedFile
 
 	// Global config first (lowest precedence in every tool's documented order).
 	for _, gc := range t.GlobalConfigs {
-		path := gc.Absolute
-		if path == "" && gc.PathFromHome != "" && chain.Home != "" {
-			path = filepath.Join(chain.Home, gc.PathFromHome)
+		var matches []string
+		if gc.Absolute != "" {
+			if s.budget.Err() == nil && isFile(gc.Absolute) && s.budget.Match(gc.Absolute) {
+				matches = []string{gc.Absolute}
+			}
+		} else if gc.PathFromHome != "" && chain.Home != "" {
+			matches = s.expandCandidate(chain.Home, gc.PathFromHome)
 		}
-		if path == "" {
-			continue
-		}
-		matches := expandCandidate(path)
 		for _, m := range matches {
-			if content, ok := readFile(m); ok {
+			if content, ok := s.readFile(m); ok {
 				files = append(files, MatchedFile{
 					Path:    m,
 					Content: content,
@@ -187,9 +211,9 @@ func scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
 		dirHadMatch := false
 	localFilesLoop:
 		for _, lf := range t.LocalFiles {
-			matches := expandCandidate(filepath.Join(dir, lf.Pattern))
+			matches := s.expandCandidate(dir, lf.Pattern)
 			for _, m := range matches {
-				content, ok := readFile(m)
+				content, ok := s.readFile(m)
 				if !ok {
 					continue
 				}
@@ -226,7 +250,7 @@ func scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
 	// Downward scan (eager only; lazy tools are documented via NonFileNotes/PrecedenceNote
 	// rather than actually walked, since "lazy" means "not loaded yet" by definition).
 	if t.Downward == tools.DownwardEager {
-		files = append(files, scanDownward(t, target)...)
+		files = append(files, s.scanDownward(t, target)...)
 	}
 
 	return ToolResult{Tool: t, Files: files}
@@ -236,6 +260,10 @@ func scanTool(t tools.Tool, chain Chain, opts Options) ToolResult {
 // noise directories) looking for the tool's local file patterns, for tools that are
 // documented to eagerly scan downward (e.g. Gemini CLI, Windsurf).
 func scanDownward(t tools.Tool, target string) []MatchedFile {
+	return (&scanner{budget: budget.New(budget.Limits{})}).scanDownward(t, target)
+}
+
+func (s *scanner) scanDownward(t tools.Tool, target string) []MatchedFile {
 	const maxDepth = 6
 	const maxDirsVisited = 500
 	skip := map[string]bool{
@@ -249,26 +277,26 @@ func scanDownward(t tools.Tool, target string) []MatchedFile {
 
 	var walk func(dir string, depth int)
 	walk = func(dir string, depth int) {
-		if depth > maxDepth || visited >= maxDirsVisited {
+		if s.budget.Err() != nil {
 			return
 		}
-		entries, err := os.ReadDir(dir)
+		// A regular tag makes this an intentionally excluded cache, even if
+		// its directory is too wide to enumerate within the discovery policy.
+		if depth > 0 {
+			if info, err := os.Lstat(filepath.Join(dir, "CACHEDIR.TAG")); err == nil && info.Mode().IsRegular() {
+				return
+			}
+		}
+		if depth > maxDepth {
+			s.budget.Exceed("downward depth", dir, maxDepth)
+			return
+		}
+		if visited >= maxDirsVisited {
+			s.budget.Exceed("downward directories", dir, maxDirsVisited)
+			return
+		}
+		entries, err := s.budget.ReadDir(dir)
 		if err != nil {
-			return
-		}
-		// Cache Directory Tagging Standard (https://bford.info/cachedir/): a
-		// directory containing a regular file literally named CACHEDIR.TAG
-		// directly inside it is a build/cache dir, same as the hardcoded skip
-		// names below -- don't count it as visited and don't descend into it.
-		// entries is already in hand from the ReadDir above (this is always the
-		// first thing walk() does for any directory it's about to process), so
-		// this reuses that read instead of doing an extra stat/lookup per
-		// candidate directory. Skipped-by-name directories are never opened at
-		// all by their parent (see the entries loop below), so they never reach
-		// this point or increment visited either; depth > 0 keeps target itself
-		// (which is scanned separately by scanTool's ancestor-chain loop, not
-		// subject to skip-by-name either) from being skipped this way.
-		if depth > 0 && hasCachedirTagEntry(entries) {
 			return
 		}
 		visited++
@@ -278,12 +306,12 @@ func scanDownward(t tools.Tool, target string) []MatchedFile {
 		// target rather than in a real subdirectory below it.
 		if depth > 0 {
 			for _, lf := range t.LocalFiles {
-				matches := expandCandidate(filepath.Join(dir, lf.Pattern))
+				matches := s.expandCandidate(dir, lf.Pattern)
 				for _, m := range matches {
 					if seen[m] {
 						continue
 					}
-					content, ok := readFile(m)
+					content, ok := s.readFile(m)
 					if !ok {
 						continue
 					}
@@ -304,77 +332,98 @@ func scanDownward(t tools.Tool, target string) []MatchedFile {
 		}
 	}
 	walk(target, 0)
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	// ReadDir and pattern expansion already give deterministic sibling order.
+	// Keep preorder: a lexical full-path sort can put child/A/RULE before
+	// child/RULE and make less-specific parent instructions apply last.
 	return out
 }
 
-// hasCachedirTagEntry reports whether entries (as returned by os.ReadDir for
-// some directory) contains a regular file literally named CACHEDIR.TAG, per
-// the Cache Directory Tagging Standard (https://bford.info/cachedir/). A
-// directory or symlink named CACHEDIR.TAG does not count -- only a regular
-// file tags its containing directory as a cache directory.
-func hasCachedirTagEntry(entries []os.DirEntry) bool {
-	for _, e := range entries {
-		if e.Name() == "CACHEDIR.TAG" {
-			return e.Type().IsRegular()
-		}
-	}
-	return false
+func readFile(path string) (string, bool) {
+	return (&scanner{budget: budget.New(budget.Limits{})}).readFile(path)
 }
 
-func readFile(path string) (string, bool) {
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
+func (s *scanner) readFile(path string) (string, bool) {
+	if s.budget.Err() != nil {
 		return "", false
 	}
-	b, err := os.ReadFile(path)
+	f, err := fileio.OpenRegular(path)
 	if err != nil {
 		return "", false
 	}
-	return string(b), true
+	defer f.Close()
+	data, err := s.budget.Read(f, path)
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
 }
 
-// expandCandidate resolves a path that may contain glob metacharacters. Plain paths
-// (no glob chars) are returned as a single-element slice if they exist as a regular
-// file, so callers get consistent existence-checking either way.
+// expandCandidate resolves a relative registry pattern below a literal base path.
+// Only pattern components are matched; metacharacters in base or in discovered
+// directory names must never select sibling directories. Results are regular
+// files, including symlinks to regular files, in deterministic lexical order.
 //
 // A "**" path segment is treated as "recurse through zero or more directories",
 // matching the doublestar convention used in the tool docs this prototype models
 // (e.g. Copilot's ".github/instructions/**/*.instructions.md"). filepath.Glob has no
 // native support for this (it treats "**" identically to "*", i.e. one segment,
 // non-recursive), so "**" segments are handled with an explicit recursive walk.
-func expandCandidate(pattern string) []string {
+func expandCandidate(base, pattern string) []string {
+	return (&scanner{budget: budget.New(budget.Limits{})}).expandCandidate(base, pattern)
+}
+
+func (s *scanner) expandCandidate(base, pattern string) []string {
+	if s.budget.Err() != nil {
+		return nil
+	}
 	if !strings.ContainsAny(pattern, "*?[") {
-		if isFile(pattern) {
-			return []string{pattern}
+		path := filepath.Join(base, pattern)
+		if isFile(path) && s.budget.Match(path) {
+			return []string{path}
 		}
 		return nil
 	}
-	if strings.Contains(pattern, "**") {
-		return expandDoublestar(pattern)
+	part, rest, more := strings.Cut(filepath.FromSlash(pattern), string(filepath.Separator))
+	if part == "**" {
+		return s.expandDoublestar(base, rest)
 	}
-	matches, err := filepath.Glob(pattern)
+	if !strings.ContainsAny(part, "*?[") && more {
+		return s.expandCandidate(filepath.Join(base, part), rest)
+	}
+	entries, err := s.budget.ReadDir(base)
 	if err != nil {
 		return nil
 	}
 	var out []string
-	for _, m := range matches {
-		if isFile(m) {
-			out = append(out, m)
+	for _, entry := range entries {
+		if s.budget.Err() != nil {
+			return nil
+		}
+		matched, err := filepath.Match(part, entry.Name())
+		if err != nil {
+			return nil
+		}
+		if !matched {
+			continue
+		}
+		path := filepath.Join(base, entry.Name())
+		if more {
+			out = append(out, s.expandCandidate(path, rest)...)
+		} else if isFile(path) && s.budget.Match(path) {
+			out = append(out, path)
 		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-// expandDoublestar handles a glob pattern containing exactly one "**" segment by
-// walking every directory from the base (the portion before "**") downward and
-// applying the remaining suffix pattern (the portion after "**", with its leading
-// separator stripped) at each level via filepath.Glob.
-func expandDoublestar(pattern string) []string {
-	idx := strings.Index(pattern, "**")
-	base := filepath.Dir(pattern[:idx])
-	suffix := strings.TrimPrefix(pattern[idx+len("**"):], string(filepath.Separator))
+// expandDoublestar walks from a literal base and applies the suffix at each level.
+// Hidden directories and directory symlinks are not traversed recursively.
+func expandDoublestar(base, suffix string) []string {
+	return (&scanner{budget: budget.New(budget.Limits{})}).expandDoublestar(base, suffix)
+}
+
+func (s *scanner) expandDoublestar(base, suffix string) []string {
 	if suffix == "" {
 		suffix = "*"
 	}
@@ -383,17 +432,15 @@ func expandDoublestar(pattern string) []string {
 	const maxDepth = 12
 	var walk func(dir string, depth int)
 	walk = func(dir string, depth int) {
-		if depth > maxDepth {
+		if s.budget.Err() != nil {
 			return
 		}
-		if matches, err := filepath.Glob(filepath.Join(dir, suffix)); err == nil {
-			for _, m := range matches {
-				if isFile(m) {
-					out = append(out, m)
-				}
-			}
+		if depth > maxDepth {
+			s.budget.Exceed("doublestar depth", dir, maxDepth)
+			return
 		}
-		entries, err := os.ReadDir(dir)
+		out = append(out, s.expandCandidate(dir, suffix)...)
+		entries, err := s.budget.ReadDir(dir)
 		if err != nil {
 			return
 		}
@@ -412,7 +459,7 @@ func expandDoublestar(pattern string) []string {
 
 func isFile(path string) bool {
 	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
+	return err == nil && info.Mode().IsRegular()
 }
 
 func isDir(path string) bool {

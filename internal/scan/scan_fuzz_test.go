@@ -37,14 +37,14 @@ func FuzzExpandCandidateFilesystemInvariants(f *testing.F) {
 		if err := os.WriteFile(filepath.Join(root, ".hidden", segment+"."+suffix), []byte("hidden"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		pattern := filepath.Join(root, segment+"."+suffix)
+		pattern := segment + "." + suffix
 		want := paths[:1]
 		if doublestar {
-			pattern = filepath.Join(root, "**", segment+"."+suffix)
+			pattern = filepath.Join("**", segment+"."+suffix)
 			want = paths
 		}
-		got := expandCandidate(pattern)
-		gotAgain := expandCandidate(pattern)
+		got := expandCandidate(root, pattern)
+		gotAgain := expandCandidate(root, pattern)
 		if !reflect.DeepEqual(got, gotAgain) {
 			t.Fatal("expansion is nondeterministic")
 		}
@@ -76,7 +76,7 @@ func FuzzExpandCandidateFilesystemInvariants(f *testing.F) {
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("got %v, want %v", got, want)
 		}
-		missing := expandCandidate(filepath.Join(root, "missing-"+segment))
+		missing := expandCandidate(root, "missing-"+segment)
 		if len(missing) != 0 {
 			t.Fatalf("missing plain path returned %v", missing)
 		}
@@ -92,7 +92,7 @@ func FuzzExpandCandidateArbitraryBoundedPatternNeverPanics(f *testing.F) {
 			t.Skip()
 		}
 		root := t.TempDir()
-		for _, match := range expandCandidate(filepath.Join(root, pattern)) {
+		for _, match := range expandCandidate(root, pattern) {
 			rel, err := filepath.Rel(root, match)
 			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				t.Fatalf("pattern %q escaped root via %q", pattern, match)

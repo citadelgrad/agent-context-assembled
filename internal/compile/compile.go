@@ -13,6 +13,7 @@ package compile
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -114,6 +115,9 @@ func Run(results []scan.ToolResult) []ToolCompile {
 }
 
 func compileTool(r scan.ToolResult) ToolCompile {
+	if r.Tool.Slug == "codex-cli" {
+		r.Files = codexEffectiveFiles(r.Files)
+	}
 	tc := ToolCompile{
 		Tool:           r.Tool.Name,
 		Slug:           r.Tool.Slug,
@@ -152,6 +156,25 @@ func compileTool(r scan.ToolResult) ToolCompile {
 	tc.TokenEstimate = tokenEstimate(tc.CharCount)
 	tc.LimitChecks = limitChecks(r)
 	return tc
+}
+
+// codexEffectiveFiles resolves local overrides without changing the raw inventory.
+// The same selected files feed both assembly and the project-doc byte budget.
+func codexEffectiveFiles(files []scan.MatchedFile) []scan.MatchedFile {
+	overridden := make(map[string]bool)
+	for _, f := range files {
+		if !strings.HasPrefix(f.Note, "global:") && filepath.Base(f.Path) == "AGENTS.override.md" {
+			overridden[filepath.Dir(f.Path)] = true
+		}
+	}
+	out := make([]scan.MatchedFile, 0, len(files))
+	for _, f := range files {
+		if !strings.HasPrefix(f.Note, "global:") && filepath.Base(f.Path) == "AGENTS.md" && overridden[filepath.Dir(f.Path)] {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // mergeModel gives a one-line, tool-specific label for how chunks actually

@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -75,14 +74,25 @@ func TestScanDownwardSafetyDeterminismAndBoundaries(t *testing.T) {
 	}
 	write(filepath.Join(root, "cache", "CACHEDIR.TAG"))
 	cur := root
-	for depth := 1; depth <= 7; depth++ {
+	// Keep this control within the supported depth. Public Run's depth-7
+	// exhaustion is covered by TestRunRefusesIncompleteDepthLimitedContext.
+	for depth := 1; depth <= 6; depth++ {
 		cur = filepath.Join(cur, "d")
 		write(filepath.Join(cur, "RULE.md"))
 	}
 	got := scanDownward(tool, root)
 	again := scanDownward(tool, root)
-	if !reflect.DeepEqual(got, again) || !sort.SliceIsSorted(got, func(i, j int) bool { return got[i].Path < got[j].Path }) {
-		t.Fatal("downward scan not sorted/deterministic")
+	if !reflect.DeepEqual(got, again) {
+		t.Fatal("downward scan not deterministic")
+	}
+	// docs/design.md requires general-to-specific, not full-path lexical order.
+	// Retain the ordering assertion, but check the actual hierarchy contract.
+	for i, file := range got {
+		for _, later := range got[i+1:] {
+			if strings.HasPrefix(filepath.Dir(file.Path), filepath.Dir(later.Path)+string(filepath.Separator)) {
+				t.Fatalf("descendant %q precedes ancestor %q", file.Path, later.Path)
+			}
+		}
 	}
 	seen := map[string]bool{}
 	for _, file := range got {
@@ -108,6 +118,7 @@ func TestScanDownwardSafetyDeterminismAndBoundaries(t *testing.T) {
 }
 
 func TestScanDownwardVisitLimitIs500Directories(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
 	tool := tools.Tool{LocalFiles: []tools.LocalFile{{Pattern: "RULE.md"}}}
 	for i := 0; i < 501; i++ {
@@ -120,6 +131,10 @@ func TestScanDownwardVisitLimitIs500Directories(t *testing.T) {
 		}
 	}
 	got := scanDownward(tool, root)
+	result, _, err := Run(root, Options{ToolSlugs: map[string]bool{"gemini-cli": true}})
+	if err == nil || len(result) != 0 || !strings.Contains(err.Error(), "downward directories") {
+		t.Fatalf("public scan silently truncated visits: %d %v", len(result), err)
+	}
 	// Target itself consumes one visit, leaving 499 eligible child directories.
 	if len(got) != 499 {
 		t.Fatalf("got %d files, want 499 under 500-directory visit cap", len(got))

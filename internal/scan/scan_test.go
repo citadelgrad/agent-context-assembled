@@ -1027,33 +1027,33 @@ func TestExpandCandidatePlainPath(t *testing.T) {
 	f := filepath.Join(tmp, "CLAUDE.md")
 	mustWriteFile(t, f, "hi")
 
-	got := expandCandidate(f)
+	got := expandCandidate(tmp, "CLAUDE.md")
 	if len(got) != 1 || got[0] != f {
 		t.Errorf("expandCandidate(%q) = %v, want [%q]", f, got, f)
 	}
 
 	missing := filepath.Join(tmp, "NOPE.md")
-	if got := expandCandidate(missing); got != nil {
+	if got := expandCandidate(tmp, "NOPE.md"); got != nil {
 		t.Errorf("expandCandidate(%q) = %v, want nil for nonexistent file", missing, got)
 	}
 
 	// A directory (not a regular file) at that path should not match.
 	dirPath := filepath.Join(tmp, "adir")
 	mustMkdirAll(t, dirPath)
-	if got := expandCandidate(dirPath); got != nil {
+	if got := expandCandidate(tmp, "adir"); got != nil {
 		t.Errorf("expandCandidate(%q) = %v, want nil for a directory", dirPath, got)
 	}
 }
 
 // TestExpandCandidateSimpleGlob verifies a single-"*" glob (no doublestar)
-// expands via filepath.Glob and only returns regular files, sorted.
+// only returns matching regular files, sorted.
 func TestExpandCandidateSimpleGlob(t *testing.T) {
 	tmp := tempDir(t)
 	mustWriteFile(t, filepath.Join(tmp, "rules", "b.md"), "b")
 	mustWriteFile(t, filepath.Join(tmp, "rules", "a.md"), "a")
 	mustMkdirAll(t, filepath.Join(tmp, "rules", "subdir")) // should not match *.md
 
-	got := expandCandidate(filepath.Join(tmp, "rules", "*.md"))
+	got := expandCandidate(tmp, filepath.Join("rules", "*.md"))
 	want := []string{filepath.Join(tmp, "rules", "a.md"), filepath.Join(tmp, "rules", "b.md")}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -1075,8 +1075,8 @@ func TestExpandCandidateDoublestarRecursesSubdirectories(t *testing.T) {
 	mustWriteFile(t, filepath.Join(base, "nested", "deep.instructions.md"), "deep")
 	mustWriteFile(t, filepath.Join(base, "ignored.txt"), "not matched, wrong suffix")
 
-	pattern := filepath.Join(base, "**", "*.instructions.md")
-	got := expandCandidate(pattern)
+	pattern := filepath.Join("**", "*.instructions.md")
+	got := expandCandidate(base, pattern)
 
 	if !containsString(got, filepath.Join(base, "top.instructions.md")) {
 		t.Errorf("expected doublestar match for zero-directories case; got %v", got)
@@ -1093,8 +1093,8 @@ func TestExpandCandidateDoublestarRecursesSubdirectories(t *testing.T) {
 // when the base directory (before "**") doesn't exist at all.
 func TestExpandCandidateDoublestarNoBaseDir(t *testing.T) {
 	tmp := tempDir(t)
-	pattern := filepath.Join(tmp, "nonexistent", "**", "*.md")
-	got := expandCandidate(pattern)
+	pattern := filepath.Join("nonexistent", "**", "*.md")
+	got := expandCandidate(tmp, pattern)
 	if got != nil {
 		t.Errorf("expandCandidate on missing base dir = %v, want nil", got)
 	}

@@ -57,7 +57,8 @@ type LocalFile struct {
 // user-level config. GlobalConfigMode determines whether candidates stack or
 // act as ordered fallbacks; local FirstMatchWins semantics are independent.
 type GlobalConfig struct {
-	// PathFromHome is joined onto the user's home directory. Mutually exclusive with Absolute.
+	// PathFromHome is a filename or glob relative to the literal home directory.
+	// Mutually exclusive with Absolute.
 	PathFromHome string
 	// Absolute is used verbatim (e.g. managed/enterprise paths). Mutually exclusive with PathFromHome.
 	Absolute string
@@ -218,7 +219,7 @@ var Registry = []Tool{
 		Downward:       DownwardNone,
 		FirstMatchWins: false,
 		GlobalConfigs: []GlobalConfig{
-			{PathFromHome: "Documents/Cline/Rules", Note: "global (macOS/Windows documented path)"},
+			{PathFromHome: "Documents/Cline/Rules/*", Note: "global rule directory (macOS/Windows documented path)"},
 		},
 		PrecedenceNote: "Additive: global + workspace combined; workspace rules take precedence on conflict. No documented ancestor walk-up; monorepo subdirectory nesting is an open feature request, not implemented.",
 	},

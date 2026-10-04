@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -298,8 +299,8 @@ func TestRunMaxCharsWritesOverflowNoticeInJSONMode(t *testing.T) {
 
 func TestWriteSizeGuardedCountsUnicodeCharacters(t *testing.T) {
 	var buf bytes.Buffer
-	if err := writeSizeGuarded(&buf, 2, false, "", func(out *bytes.Buffer) error {
-		out.WriteString("🙂界")
+	if err := writeSizeGuarded(&buf, 2, false, "", func(out io.Writer) error {
+		io.WriteString(out, "🙂界")
 		return nil
 	}); err != nil {
 		t.Fatal(err)

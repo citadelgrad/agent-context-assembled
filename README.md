@@ -79,7 +79,8 @@ Flags:
 - `--tool` — restrict output to a comma-separated list of tool slugs, e.g.
   `--tool=claude-code,codex-cli`. Pass `--tool=list` to print all valid slugs and exit (one per
   line by default, or a JSON array if combined with `--json`). An unknown slug is a usage error
-  (exit 2).
+  (exit 2). Selection happens before discovery: excluded tools' instruction files and session
+  artifacts are not read.
 - `--version` — print the version and exit.
 - `--max-chars` — safety cap on total output size in Unicode code points (default `80000`, ~20,000
   tokens at this tool's character-count/4 estimate). Output over the cap is written to a temp file
@@ -91,7 +92,9 @@ Flags:
   persistent path instead of an OS-managed temp file. Without `--out`, overflow files are
   intentionally left in the OS temp directory for the OS to clean up; actx cannot safely remove
   them because callers may need to read them after the process exits. New `--out` files are created
-  with owner-only permissions; existing files retain their current permissions.
+  with owner-only permissions; existing files retain their current permissions. The complete file
+  is published before its path is announced. If the notice itself fails to write, a caller-chosen
+  output file remains published and the command reports an error.
 
 ### Agent/scripting notes
 
@@ -101,6 +104,14 @@ Flags:
 - **Output size guard**: any mode/flag combination can trigger the `--max-chars` overflow notice
   above (default 80000 chars) — check for a `truncated: true` field in JSON output, or the text
   "Output too large" in text output, rather than assuming a response always contains real content.
+  This caps delivered output, independently of the input and staging budgets below.
+- **Resource budgets**: scans fail with an actionable error rather than return partial context.
+  Live reports use `incomplete: true` when discovery or reading cannot finish; they omit partial
+  content and explain the reason. A live command can exit `0` with incomplete reports, so inspect
+  that field rather than treating the exit code as proof of complete discovery.
+- **Terminal safety**: text output displays terminal control characters as hexadecimal escapes,
+  preserving newlines, tabs, and printable Unicode. JSON retains the original string values;
+  callers displaying decoded JSON in a terminal must escape them themselves.
 - **Exit codes**: `0` success, `1` runtime error (bad path, scan failure), `2` usage error (bad
   flag, unknown `--tool` slug). `--help`/`-h` prints usage and exits `0` (it's a request, not a
   failure).
@@ -110,6 +121,36 @@ Flags:
 - **Tool-count consistency**: default and `--compile` JSON omit tools with no contributing files
   unless `--all` is passed; `--live` JSON always includes every tool regardless of `--all` (see
   above). Pass `--all` explicitly if your caller assumes a fixed-length array.
+
+### Resource and filesystem safety
+
+These are actx safety policies, not limits imposed by the inspected tools. Each scan or live
+inspection shares one input budget across its selected tools:
+
+- 16 MiB per content read and 64 MiB aggregate input bytes;
+- 1,024 content reads, 2,048 directory-listing attempts, 32,768 directory entries, and 4,096
+  candidate matches. Repeated work counts again; irrelevant directory entries also count.
+
+Directory entries are acquired in bounded batches, not loaded in full before checking the cap.
+An extra byte or entry distinguishes an exact-limit input from an oversized one. Existing
+downward-walk depth/visit limits and recursive-glob depth limits now produce explicit errors if
+they would omit eligible input. Narrow the target or use `--tool` to reduce work. These defaults
+are fixed policies, not additional CLI flags; `--max-chars=0` does not disable input budgets.
+
+Capped rendering retains at most 256 KiB of rendered bytes in its staging buffer, then spills to
+a private temporary file. Staged output is limited to 64 MiB; atomic output publication can
+temporarily need a second copy, for up to 128 MiB of temporary disk space. `--max-chars=0` streams
+directly without staging, so a later rendering or sink error can leave partial stdout. Compiling,
+JSON encoding, and formatting still allocate input-derived objects; this is not a process-wide
+memory ceiling. `--out` is untouched when the delivered-output cap is not exceeded.
+
+On Unix, instruction/session content opens use nonblocking acquisition followed by regular-file
+descriptor validation. A regular file replaced by a writerless FIFO cannot stall that open.
+Ordinary instruction symlinks remain supported; Aider history links stay confined to the target
+project. Windows validates the opened descriptor but does not have this Unix nonblocking-open
+guarantee. Other unsupported platforms fail closed for content opens. None of these policies is
+a hard deadline for kernel calls, network filesystems, or arbitrary device drivers, nor an atomic
+snapshot of a changing filesystem.
 
 ### Examples
 
@@ -183,7 +224,9 @@ Merge semantics differ per tool and are applied accordingly (see
 the full breakdown):
 
 - **Additive concatenation** (Claude Code, Codex CLI, Cline, Gemini CLI) — every matched file is
-  appended in precedence order.
+  appended in precedence order, after resolving overrides. For Codex, `AGENTS.override.md`
+  replaces `AGENTS.md` in the same project directory before assembly and byte-limit checks.
+  The default raw file inventory still shows both files when present.
 - **Conditional / path-scoped** (GitHub Copilot's `applyTo`-scoped `.instructions.md`, Cursor's
   rule-type frontmatter, Windsurf's `trigger`/`globs` frontmatter) — chunks are included with an
   explicit `condition` (e.g. `applyTo: **/*.go`) rather than assumed to always apply.
@@ -209,13 +252,14 @@ question: can we see what a tool **actually** loaded, in a real past or current 
 ground truth, not a prediction? This is inherently best-effort and varies wildly by tool, since
 it depends on undocumented or semi-documented internals that can change across tool versions.
 
-Every one of the 9 tools always gets a report — the CLI never silently omits a tool, even when
-nothing is discoverable. Each report is classified into one of four mechanisms:
+Every selected tool gets a report — the CLI never silently omits a selected tool, even when
+nothing is discoverable. Without `--tool`, all supported tools are selected. Each report is
+classified into one of four mechanisms:
 
 | Mechanism | Meaning |
 |---|---|
 | `content-confirmed` | Real extracted content — a genuine artifact was found and parsed |
-| `metadata-only` | An artifact exists, but its format is too undocumented/fragile to parse reliably; only path/count/last-modified are reported |
+| `metadata-only` | An artifact exists, but content is unavailable, empty, over the input budget, or too fragile to parse reliably; only metadata is reported |
 | `documented-flag-not-run` | A real, docs-confirmed mechanism exists but is interactive or must be enabled before a session runs — nothing to retroactively read |
 | `none` | Nothing discoverable at all |
 
@@ -225,11 +269,19 @@ Highlights (full sourced detail in
 - **Codex CLI** — strongest result: session rollout JSONL files under `~/.codex/sessions/` contain
   `base_instructions` (fixed system prompt) and `user_instructions` (compiled AGENTS.md payload)
   verbatim. `--live` scopes this to the target directory via each rollout's embedded `cwd`.
+  Project instructions come from the latest decoded turn, not the last nonempty earlier turn.
+  A matching `cwd` without recovered instructions is reported as metadata only.
 - **Aider** — if `--llm-history-file` was used, `.aider.llm.history` contains the real system
   prompt verbatim (confirmed in source); the default `.aider.chat.history.md` does not.
+  Reads are confined to the target project: relative in-project symlinks are supported, but
+  escaping and absolute symlinks are refused. Empty histories and histories exceeding actx's
+  16 MiB input budget are reported as metadata only, without partial content. This budget is
+  an actx safety policy, not an Aider limit.
 - **Claude Code** — session transcripts exist and are located, but do not contain the verbatim
   compiled system prompt; the real mechanism (`OTEL_LOG_RAW_API_BODIES`) requires OpenTelemetry
   logging configured ahead of time, not a retroactive read.
+  Encoded project-directory names can collide; transcript paths/counts are candidates with
+  unverified project scope, not proof that those sessions belong to the requested directory.
 - **OpenCode** — `opencode export <sessionID>` is a real, confirmed way to dump the actual system
   prompt, but it's a command you run, not a file this CLI can read on its own.
 - **GitHub Copilot / Windsurf / Cline** — each has a real, docs-confirmed mechanism (VS Code's
@@ -242,6 +294,8 @@ Highlights (full sourced detail in
 
 `--live --json` emits one object per tool with `mechanism`, `summary`, `detail`, `confidence`, and
 (where applicable) `artifactPath`, `artifactCount`, `lastModified`, `extractedContent`.
+An interrupted discovery/read adds `incomplete: true`; a healthy report omits that field. An
+incomplete Codex search never promotes an older readable rollout to confirmed latest content.
 
 ## What it checks
 
@@ -333,6 +387,8 @@ go build -o actx ./cmd/actx
 
 - `cmd/actx/` — CLI entry point (flag parsing, dispatch to scan/compile/inspect+render).
 - `internal/tools/` — static per-tool specs (filenames, scope, precedence, global config paths).
+- `internal/budget/` — shared finite input-byte, content-read, directory-entry and candidate budgets.
+- `internal/fileio/` — regular-file descriptor validation and Unix nonblocking content opens.
 - `internal/scan/` — directory-walk + file-matching engine; always returns full file content.
 - `internal/compile/` — `--compile`: assembles matched files per tool's real merge model, with
   chunk separators, token estimates, and documented-limit checks.

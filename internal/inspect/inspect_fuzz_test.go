@@ -51,6 +51,10 @@ func codexRolloutFixture(operations []byte) (content, cwd, base, user string) {
 			lines = append(lines, rolloutRecord("session_meta", map[string]any{
 				"cwd": value, "base_instructions": map[string]any{"text": "base-" + value},
 			}))
+			// A new project cannot inherit another project's turn payload.
+			if cwd != value {
+				user = ""
+			}
 			cwd, base = value, "base-"+value
 		case 2:
 			lines = append(lines, rolloutRecord("turn_context", map[string]any{
@@ -68,11 +72,19 @@ func codexRolloutFixture(operations []byte) (content, cwd, base, user string) {
 				lines = append(lines, rolloutRecord("session_meta", map[string]any{
 					"cwd": value, "base_instructions": map[string]any{"text": ""},
 				}))
-				cwd = value
+				// Session metadata replaces its fixed-persona snapshot;
+				// empty content is not a request to preserve the old one.
+				if cwd != value {
+					user = ""
+				}
+				cwd, base = value, ""
 			} else {
 				lines = append(lines, rolloutRecord("turn_context", map[string]any{
 					"cwd": "", "user_instructions": "",
 				}))
+				// A turn records its own project-doc snapshot, not a patch
+				// (docs/research.md, Runtime introspection). Empty clears it.
+				user = ""
 			}
 		}
 	}

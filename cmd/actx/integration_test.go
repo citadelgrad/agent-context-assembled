@@ -236,24 +236,32 @@ func TestIntegrationJSONErrorIsStructuredJSON(t *testing.T) {
 func TestIntegrationJSONEqualsTrueErrorIsStructuredJSON(t *testing.T) {
 	bin := buildBinary(t)
 
-	// A flag-parse failure (not a runtime error) with --json passed in the
-	// "=value" form the flag package also accepts for bool flags; the error
-	// must still come out as JSON, matching the bare "--json" form. stderr
-	// also carries the usage text on a flag-parse failure (printed by
-	// fs.Usage regardless of --json), so only the final line is the error
-	// object, same as TestIntegrationUnknownFlagExitsTwoWithSingleErrorLine.
-	_, errOut, code := runBinary(t, bin, "--json=true", "--not-a-real-flag")
-	if code != 2 {
-		t.Errorf("exit code = %d, want 2 for a usage error", code)
+	// The whole error stream, not just its final line, is the JSON contract.
+	for _, args := range [][]string{
+		{"--json=true", "--not-a-real-flag"},
+		{"--json", "--max-chars=nope"},
+		{"--not-a-real-flag", "--json"},
+		{"-json=1", "--full=not-bool"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			out, errOut, code := runBinary(t, bin, args...)
+			if code != 2 || out != "" {
+				t.Fatalf("exit = %d, stdout = %q; want exit 2 and empty stdout", code, out)
+			}
+			var parsed map[string]string
+			if err := json.Unmarshal([]byte(errOut), &parsed); err != nil {
+				t.Fatalf("complete stderr is not JSON: %v; stderr: %q", err, errOut)
+			}
+			if len(parsed) != 1 || parsed["error"] == "" {
+				t.Fatalf("expected exactly a non-empty error field, got: %v", parsed)
+			}
+		})
 	}
-	lines := strings.Split(strings.TrimRight(errOut, "\n"), "\n")
-	lastLine := lines[len(lines)-1]
-	var parsed map[string]string
-	if err := json.Unmarshal([]byte(lastLine), &parsed); err != nil {
-		t.Fatalf("last stderr line under --json=true is not a valid JSON object: %v\nline: %s\nfull stderr: %s", err, lastLine, errOut)
-	}
-	if parsed["error"] == "" {
-		t.Errorf("expected non-empty \"error\" field, got: %v", parsed)
+	for _, args := range [][]string{{"--help"}, {"--json", "--help"}, {"--json=true", "-h"}} {
+		_, errOut, code := runBinary(t, bin, args...)
+		if code != 0 || !strings.Contains(errOut, "Usage:") || !strings.Contains(errOut, "-tool string") {
+			t.Errorf("help %v: exit %d, stderr %q; want readable complete help and exit 0", args, code, errOut)
+		}
 	}
 }
 

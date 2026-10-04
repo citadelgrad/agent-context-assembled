@@ -50,6 +50,11 @@ This is the key design decision: **the tool does not apply one generic rule to a
 encodes each tool's actual precedence semantics from research.md and only presents what that tool
 would truly have loaded.
 
+`--tool` selection is applied before per-tool discovery. Target, home, and discovered directory
+names are literal paths; only registry pattern components are interpreted as globs. Reads reject
+known non-regular files, while retaining symlinks to regular instruction files. These checks do
+not prevent a concurrently replaced file from changing type between stat and open.
+
 ## Step 3 — check each tool's global config location once
 
 Independent of `target`, check the tool's documented global/user config path(s) (e.g.
@@ -63,6 +68,9 @@ prototype and noted as such in the README.
 Per research.md, the order files are listed for a given tool reflects how that tool actually
 applies them (earlier in the list = applied first / less specific; later = applied last / more
 specific / wins on conflict), not just alphabetical or discovery order:
+
+Eager descendant discovery preserves deterministic parent-before-child traversal rather than
+sorting full file paths, which can place a child rule before its parent.
 
 | Tool | Applied order |
 |---|---|
@@ -91,7 +99,9 @@ listing them. This lives in `internal/compile`. Per tool:
 - **Merge model.** Each tool gets a short label describing how it really merges multiple matched
   files, not a generic assumption:
   - *Additive concatenation* (Claude Code, Codex CLI, Cline, Gemini CLI): every matched file's
-    content is appended in precedence order.
+    content is appended in precedence order after overrides are resolved. Codex compilation
+    removes a local `AGENTS.md` when a same-directory `AGENTS.override.md` is present; this
+    effective file list also drives byte-limit checks. The raw scan inventory retains both.
   - *Conditional / path-scoped*: GitHub Copilot (`.github/instructions/*.instructions.md` carries
     an `applyTo` frontmatter glob — only applies to matching files, noted as a condition, not
     unconditionally concatenated), Cursor (`.cursor/rules/*.mdc` frontmatter rule-type field
@@ -132,8 +142,9 @@ artifact format makes scoping possible (Claude Code's encoded-cwd project direct
 embedded `cwd` field per rollout, Aider's per-directory history file, Gemini CLI's project-hash
 log directory).
 
-Every one of the 9 tools always produces a `Report`, classified into exactly one of four
-mechanisms — **no tool is ever silently omitted**, even when nothing was found:
+Every selected tool produces a `Report`, classified into exactly one of four mechanisms —
+**no selected tool is silently omitted**, even when nothing was found. Selection occurs before
+artifact access; without `--tool`, every supported tool is selected:
 
 | Mechanism | Meaning |
 |---|---|
@@ -143,9 +154,53 @@ mechanisms — **no tool is ever silently omitted**, even when nothing was found
 | `none` | Nothing discoverable at all |
 
 Each `Report` carries a `Summary`, `Detail`, `Confidence`, and optionally `ArtifactPath` /
-`ArtifactCount` / `LastModified` / `ExtractedContent`. This mirrors the compile-mode principle of
+`ArtifactCount` / `LastModified` / `ExtractedContent`, plus `Incomplete` when work cannot finish.
+This mirrors the compile-mode principle of
 never inventing facts: where content can be honestly extracted, it is; where it can't, the CLI
 says so explicitly instead of guessing at a schema.
+
+Codex reports retain the current decoded turn's project instructions, including an empty value,
+rather than combining the newest cwd with an older nonempty payload. A cwd match without content
+is metadata-only. Claude's encoded directory is only a candidate location because different paths
+can encode identically. Aider history reads use a project-confined `os.Root` and a 16 MiB input
+budget; oversized and empty histories produce metadata-only reports. This does not establish
+artifact authenticity or provide an atomic filesystem snapshot.
+
+## Resource boundaries and file opening
+
+`internal/budget` owns one shared policy per scan or live-inspection invocation: 16 MiB per
+content read, 64 MiB aggregate bytes, 1,024 content reads, 2,048 directory-listing attempts,
+32,768 acquired entries and 4,096 candidate matches. These are actx policies, not upstream limits.
+Repeated operations consume budget again. Directory reads acquire batches of at most 128 entries
+and sort only a complete directory; exhaustion does not expose an arbitrary filesystem-order
+prefix. Byte and entry limits permit one detection sentinel, then stop further acquisition.
+
+Scanning fails closed with no partial results on budget or existing traversal-depth/visit
+exhaustion. Live inspection instead emits a metadata-only report with `incomplete: true`, an
+explanation, and no extracted content or misleading partial count/latest timestamp. Completed
+earlier reports remain usable; subsequent filesystem probes stop after shared budget exhaustion.
+Codex discovery/read failures never silently fall back to an older rollout. The fixed-path Aider
+report can retain its known descriptor timestamp without claiming complete content. Intentional
+noise-directory exclusions remain exclusions, not budget failures.
+
+`internal/fileio` acquires content descriptors with `O_NONBLOCK` on Unix, then validates the
+opened descriptor as regular before any read. This closes the preflight-stat/FIFO-open waiting
+window. Ordinary symlinks still resolve; `OpenRegularAt` preserves `os.Root` confinement for Aider
+history. Windows provides post-open validation only, without the Unix nonblocking guarantee;
+other unsupported platforms fail closed. Directory acquisition uses `os.Root`. None of these
+operations provides a hard filesystem-call deadline, a device sandbox, or a content snapshot.
+
+`cmd/actx/output.go` separates delivered character limits from output staging. Capped output uses
+a 256 KiB buffer, lazy private-file spill, and a 64 MiB staging limit. Unicode code points are
+counted across write boundaries; `--max-chars` does not set either staging budget. Overflow output
+is fully prepared and closed before publication. Caller-chosen destinations are replaced before
+the success notice is emitted, so a pipe consumer can immediately read the advertised file. A
+notice-write failure after publication returns an error but leaves the complete configured file.
+Rendering/staging/copy/rename failures preserve the previous destination. Anonymous overflow
+files are removed on failed notice delivery; successfully announced files remain for callers.
+Atomic publication can transiently use two disk copies, up to 128 MiB. Unlimited mode streams
+directly and can leave partial stdout on a later failure. Compilation, encoding and formatting
+can still allocate input-derived objects; bounded staging is not a process-wide memory ceiling.
 
 ## Flow diagram
 

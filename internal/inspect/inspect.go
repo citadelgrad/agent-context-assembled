@@ -17,6 +17,7 @@ package inspect
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/citadelgrad/agent-context-assembled/internal/budget"
+	"github.com/citadelgrad/agent-context-assembled/internal/fileio"
 )
 
 // Mechanism categorizes how confident/complete a tool's runtime-introspection
@@ -51,9 +55,12 @@ const (
 
 // Report is one tool's runtime-introspection result.
 type Report struct {
-	Tool      string    `json:"tool"`
-	Slug      string    `json:"slug"`
-	Mechanism Mechanism `json:"mechanism"`
+	// Incomplete means discovery or reading stopped before a complete result.
+	// Exhausted input policies never produce confirmed or partial content.
+	Incomplete bool      `json:"incomplete,omitempty"`
+	Tool       string    `json:"tool"`
+	Slug       string    `json:"slug"`
+	Mechanism  Mechanism `json:"mechanism"`
 	// Summary is a one-line human-readable headline, always present.
 	Summary string `json:"summary"`
 	// Detail is a longer explanation: what was checked, what was/wasn't
@@ -78,24 +85,41 @@ type Report struct {
 // tool's artifact can be matched to a project directory. Never returns fewer
 // than the full known tool list — every tool gets an explicit report.
 func Run(targetDir string) []Report {
+	return RunSelected(targetDir, nil)
+}
+
+// RunSelected reports only selected tools, in Run's stable order. Nil selects
+// every tool; an empty nonnil map selects none. False and unknown slugs are
+// ignored. Selection happens before a tool's discovery or artifact reads.
+func RunSelected(targetDir string, slugs map[string]bool) []Report {
+	return runSelectedWithBudget(targetDir, slugs, budget.Limits{})
+}
+
+func runSelectedWithBudget(targetDir string, slugs map[string]bool, limits budget.Limits) []Report {
+	p := &inspector{budget: budget.New(limits)}
 	home, _ := os.UserHomeDir()
 	absTarget, err := filepath.Abs(targetDir)
 	if err != nil {
 		absTarget = targetDir
 	}
 
-	return []Report{
-		claudeCodeReport(home, absTarget),
-		codexCLIReport(home, absTarget),
-		openCodeReport(home),
-		aiderReport(absTarget),
-		geminiCLIReport(home, absTarget),
-		githubCopilotReport(),
-		cursorReport(home),
-		windsurfReport(home),
-		clineReport(home),
-		hermesReport(home),
+	reports := make([]Report, 0)
+	add := func(slug string, probe func() Report) {
+		if slugs == nil || slugs[slug] {
+			reports = append(reports, probe())
+		}
 	}
+	add("claude-code", func() Report { return p.claudeCodeReport(home, absTarget) })
+	add("codex-cli", func() Report { return p.codexCLIReport(home, absTarget) })
+	add("opencode", func() Report { return p.openCodeReport(home) })
+	add("aider", func() Report { return p.aiderReport(absTarget) })
+	add("gemini-cli", func() Report { return p.geminiCLIReport(home, absTarget) })
+	add("github-copilot", githubCopilotReport)
+	add("cursor", func() Report { return p.cursorReport(home) })
+	add("windsurf", func() Report { return p.windsurfReport(home) })
+	add("cline", func() Report { return p.clineReport(home) })
+	add("hermes", func() Report { return p.hermesReport(home) })
+	return reports
 }
 
 // ---- Claude Code ----------------------------------------------------------
@@ -110,6 +134,14 @@ func encodeClaudeProjectDir(absPath string) string {
 }
 
 func claudeCodeReport(home, absTarget string) Report {
+	return (&inspector{budget: budget.New(budget.Limits{})}).claudeCodeReport(home, absTarget)
+}
+
+func (p *inspector) claudeCodeReport(home, absTarget string) (result Report) {
+	defer p.finish(&result)
+	if p.budget.Err() != nil {
+		return Report{Tool: "Claude Code", Slug: "claude-code"}
+	}
 	base := Report{
 		Tool: "Claude Code",
 		Slug: "claude-code",
@@ -122,7 +154,7 @@ func claudeCodeReport(home, absTarget string) Report {
 	}
 
 	projDir := filepath.Join(home, ".claude", "projects", encodeClaudeProjectDir(absTarget))
-	entries, err := os.ReadDir(projDir)
+	entries, err := p.budget.ReadDir(projDir)
 	if err != nil || len(entries) == 0 {
 		base.Mechanism = MechanismDocumentedFlagNotRun
 		base.ArtifactPath = projDir
@@ -138,7 +170,10 @@ func claudeCodeReport(home, absTarget string) Report {
 
 	var jsonlFiles []os.DirEntry
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+		if p.budget.Err() != nil {
+			return base
+		}
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") && p.budget.Match(filepath.Join(projDir, e.Name())) {
 			jsonlFiles = append(jsonlFiles, e)
 		}
 	}
@@ -169,14 +204,16 @@ func claudeCodeReport(home, absTarget string) Report {
 	base.ArtifactPath = filepath.Join(projDir, latest.Name())
 	base.ArtifactCount = len(jsonlFiles)
 	base.LastModified = mtime
-	base.Summary = fmt.Sprintf("Found %d Claude Code session transcript(s) for this directory; most recent modified %s.",
+	base.Summary = fmt.Sprintf("Found %d candidate Claude Code session transcript(s) in the encoded directory; project scope unverified; most recent modified %s.",
 		len(jsonlFiles), mtime.Format(time.RFC3339))
-	base.Detail = "Investigated transcript structure directly: the JSONL transcript does NOT contain the compiled system prompt/CLAUDE.md text verbatim as a " +
+	base.Detail = "Project scope is unverified: replacing '/' with '-' is lossy, so different project paths can collide in this encoded directory. " +
+		"Transcript cwd metadata is not parsed; the count and latest path are candidates, not confirmed sessions for the target project. " +
+		"Investigated transcript structure directly: the JSONL transcript does NOT contain the compiled system prompt/CLAUDE.md text verbatim as a " +
 		"distinct field anywhere — only incidental filename mentions inside tool calls/results. So this CLI reports session existence/timing/hook-output metadata " +
 		"honestly rather than claiming to show 'the real system prompt' from the transcript, which would be inaccurate. Sibling directories tool-results/ (hook stdout " +
 		"capture) and subagents/ (nested Task-tool transcripts) may exist alongside the main session file at " + projDir + ". " +
 		"To actually capture the compiled system prompt as sent, re-run with OTEL_LOG_RAW_API_BODIES=1 (needs OTel export configured) or use /context for a size/category breakdown (not verbatim text)."
-	base.Confidence = "confirmed: transcript format personally inspected; does not contain verbatim system prompt (documented OTel mechanism is the only verbatim path)"
+	base.Confidence = "best-effort: candidate transcript metadata only; project scope unverified because encoded paths can collide; content not parsed"
 	return base
 }
 
@@ -202,7 +239,36 @@ type codexTurnContextPayload struct {
 	UserInstructions string `json:"user_instructions"`
 }
 
+type inspector struct{ budget *budget.Budget }
+
+func (p *inspector) finish(result *Report) {
+	if err := p.budget.Err(); err != nil && !result.Incomplete {
+		*result = incompleteReport(*result, err)
+	}
+}
+
+func incompleteReport(base Report, err error) Report {
+	base.Incomplete = true
+	base.Mechanism = MechanismMetadataOnly
+	base.ExtractedContent = ""
+	// Counts/latest timestamps from a prefix would suggest complete discovery.
+	base.ArtifactCount = 0
+	base.LastModified = time.Time{}
+	base.Summary = "Inspection incomplete: " + err.Error()
+	base.Detail = err.Error() + ". Discovery or reading was not completed; no instruction content is confirmed, and omitted candidates may be newer. These are actx safety policies, not upstream tool limits."
+	base.Confidence = "incomplete: content not confirmed"
+	return base
+}
+
 func codexCLIReport(home, absTarget string) Report {
+	return (&inspector{budget: budget.New(budget.Limits{})}).codexCLIReport(home, absTarget)
+}
+
+func (p *inspector) codexCLIReport(home, absTarget string) (result Report) {
+	defer p.finish(&result)
+	if p.budget.Err() != nil {
+		return Report{Tool: "Codex CLI", Slug: "codex-cli"}
+	}
 	base := Report{
 		Tool: "Codex CLI",
 		Slug: "codex-cli",
@@ -215,17 +281,52 @@ func codexCLIReport(home, absTarget string) Report {
 	}
 
 	sessionsRoot := filepath.Join(home, ".codex", "sessions")
+	base.ArtifactPath = sessionsRoot
 	var candidates []string
-	_ = filepath.WalkDir(sessionsRoot, func(path string, d os.DirEntry, err error) error {
+	mtimes := make(map[string]time.Time)
+	var discoveryErr error
+	var walk func(string)
+	walk = func(dir string) {
+		if discoveryErr != nil || p.budget.Err() != nil {
+			return
+		}
+		entries, err := p.budget.ReadDir(dir)
 		if err != nil {
-			return nil //nolint:nilerr // best-effort walk; skip unreadable entries
+			if dir != sessionsRoot || !os.IsNotExist(err) {
+				discoveryErr = err
+			}
+			return
 		}
-		info, infoErr := d.Info()
-		if infoErr == nil && info.Mode().IsRegular() && strings.HasSuffix(d.Name(), ".jsonl") && strings.HasPrefix(d.Name(), "rollout-") {
-			candidates = append(candidates, path)
+		for _, d := range entries {
+			if p.budget.Err() != nil {
+				return
+			}
+			path := filepath.Join(dir, d.Name())
+			if d.IsDir() {
+				walk(path)
+				continue
+			}
+			if !strings.HasSuffix(d.Name(), ".jsonl") || !strings.HasPrefix(d.Name(), "rollout-") {
+				continue
+			}
+			info, err := d.Info()
+			if err != nil {
+				discoveryErr = err
+				return
+			}
+			if info.Mode().IsRegular() && p.budget.Match(path) {
+				candidates = append(candidates, path)
+				mtimes[path] = info.ModTime()
+			}
 		}
-		return nil
-	})
+	}
+	walk(sessionsRoot)
+	if discoveryErr != nil {
+		return incompleteReport(base, discoveryErr)
+	}
+	if p.budget.Err() != nil {
+		return base
+	}
 
 	if len(candidates) == 0 {
 		base.Mechanism = MechanismDocumentedFlagNotRun
@@ -237,15 +338,11 @@ func codexCLIReport(home, absTarget string) Report {
 	}
 
 	sort.Slice(candidates, func(i, j int) bool {
-		ii, ei := os.Stat(candidates[i])
-		jj, ej := os.Stat(candidates[j])
-		if ei != nil || ej != nil {
+		ii, jj := mtimes[candidates[i]], mtimes[candidates[j]]
+		if ii.Equal(jj) {
 			return candidates[i] < candidates[j]
 		}
-		if ii.ModTime().Equal(jj.ModTime()) {
-			return candidates[i] < candidates[j]
-		}
-		return ii.ModTime().After(jj.ModTime())
+		return ii.After(jj)
 	})
 
 	// Codex rollout files aren't project-scoped by naming convention (unlike
@@ -257,7 +354,10 @@ func codexCLIReport(home, absTarget string) Report {
 	var matchCount int
 
 	for _, path := range candidates {
-		cwd, baseText, userText, ok := readCodexRollout(path)
+		cwd, baseText, userText, ok, readErr := p.readCodexRollout(path)
+		if readErr != nil {
+			return incompleteReport(base, readErr)
+		}
 		if !ok {
 			continue
 		}
@@ -267,9 +367,7 @@ func codexCLIReport(home, absTarget string) Report {
 		matchCount++
 		if matched == "" {
 			matched = path
-			if info, err := os.Stat(path); err == nil {
-				matchedMTime = info.ModTime()
-			}
+			matchedMTime = mtimes[path]
 			baseInstructions = baseText
 			userInstructions = userText
 		}
@@ -279,9 +377,7 @@ func codexCLIReport(home, absTarget string) Report {
 		base.Mechanism = MechanismMetadataOnly
 		base.ArtifactPath = sessionsRoot
 		base.ArtifactCount = len(candidates)
-		if info, err := os.Stat(candidates[0]); err == nil {
-			base.LastModified = info.ModTime()
-		}
+		base.LastModified = mtimes[candidates[0]]
 		base.Summary = fmt.Sprintf("Found %d Codex CLI rollout session file(s), but none recorded cwd matching %s.", len(candidates), absTarget)
 		base.Detail = "Codex CLI rollout files are organized by date, not project - each file's embedded cwd (from session_meta/turn_context) was checked " +
 			"and none matched the target directory. Most recent rollout overall: " + candidates[0]
@@ -289,10 +385,17 @@ func codexCLIReport(home, absTarget string) Report {
 		return base
 	}
 
-	base.Mechanism = MechanismContentConfirmed
 	base.ArtifactPath = matched
 	base.ArtifactCount = matchCount
 	base.LastModified = matchedMTime
+	if baseInstructions == "" && userInstructions == "" {
+		base.Mechanism = MechanismMetadataOnly
+		base.Summary = fmt.Sprintf("Found %d Codex CLI session(s) with matching cwd; no instruction content recovered from most recent.", matchCount)
+		base.Detail = "The latest matching rollout is " + matched + ". Its current supported instruction fields are absent, null, or empty; cwd metadata alone does not confirm instruction content."
+		base.Confidence = "best-effort: cwd matched; no instruction content recovered"
+		return base
+	}
+	base.Mechanism = MechanismContentConfirmed
 	base.Summary = fmt.Sprintf("Found %d Codex CLI session(s) for this directory; extracted actual compiled instructions from most recent.", matchCount)
 
 	var content strings.Builder
@@ -314,17 +417,36 @@ func codexCLIReport(home, absTarget string) Report {
 }
 
 func readCodexRollout(path string) (cwd, baseInstructions, userInstructions string, ok bool) {
-	f, err := os.Open(path)
+	cwd, baseInstructions, userInstructions, ok, _ = (&inspector{budget: budget.New(budget.Limits{})}).readCodexRollout(path)
+	return
+}
+
+func (p *inspector) readCodexRollout(path string) (cwd, baseInstructions, userInstructions string, ok bool, err error) {
+	if p.budget.Err() != nil {
+		return "", "", "", false, p.budget.Err()
+	}
+	f, err := fileio.OpenRegular(path)
 	if err != nil {
-		return "", "", "", false
+		return "", "", "", false, err
 	}
 	defer f.Close()
-	return readCodexRolloutReader(f)
+	data, err := p.budget.Read(f, path)
+	if err != nil {
+		return "", "", "", false, err
+	}
+	// The entire artifact is already byte-bounded. Allow its complete final
+	// line, including an exact-limit file without a trailing newline.
+	return parseCodexRollout(bytes.NewReader(data), len(data)+1)
 }
 
 func readCodexRolloutReader(r io.Reader) (cwd, baseInstructions, userInstructions string, ok bool) {
+	cwd, baseInstructions, userInstructions, ok, _ = parseCodexRollout(r, 16*1024*1024)
+	return
+}
+
+func parseCodexRollout(r io.Reader, maxToken int) (cwd, baseInstructions, userInstructions string, ok bool, err error) {
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
+	scanner.Buffer(make([]byte, 0, min(4096, maxToken)), maxToken)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -339,9 +461,18 @@ func readCodexRolloutReader(r io.Reader) (cwd, baseInstructions, userInstruction
 			var p codexSessionMetaPayload
 			if err := json.Unmarshal(rec.Payload, &p); err == nil {
 				if p.CWD != "" {
+					// Project instructions belong to the recorded cwd; a new
+					// project cannot inherit an earlier turn's project-doc.
+					if p.CWD != cwd {
+						userInstructions = ""
+					}
 					cwd = p.CWD
 				}
-				if p.BaseInstructions != nil && p.BaseInstructions.Text != "" {
+				// The current session-meta persona replaces the prior one,
+				// including absence/null/empty; see docs/research.md and
+				// https://pkg.go.dev/encoding/json#Unmarshal (fresh decoding).
+				baseInstructions = ""
+				if p.BaseInstructions != nil {
 					baseInstructions = p.BaseInstructions.Text
 				}
 			}
@@ -351,21 +482,33 @@ func readCodexRolloutReader(r io.Reader) (cwd, baseInstructions, userInstruction
 				if p.CWD != "" {
 					cwd = p.CWD
 				}
-				if p.UserInstructions != "" {
-					userInstructions = p.UserInstructions
-				}
+				// A turn is a snapshot of its project-doc payload, not a
+				// last-nonempty merge (docs/research.md, Runtime introspection).
+				// Decode into a fresh value: absent, null and empty strings
+				// provide no current content and must not resurrect an old turn.
+				// https://pkg.go.dev/encoding/json#Unmarshal: null into a
+				// string leaves it unchanged, so reusing p would be unsafe.
+				userInstructions = p.UserInstructions
 			}
 		}
 	}
 	if scanner.Err() != nil {
-		return "", "", "", false
+		return "", "", "", false, scanner.Err()
 	}
-	return cwd, baseInstructions, userInstructions, cwd != ""
+	return cwd, baseInstructions, userInstructions, cwd != "", nil
 }
 
 // ---- OpenCode --------------------------------------------------------
 
 func openCodeReport(home string) Report {
+	return (&inspector{budget: budget.New(budget.Limits{})}).openCodeReport(home)
+}
+
+func (p *inspector) openCodeReport(home string) (result Report) {
+	defer p.finish(&result)
+	if p.budget.Err() != nil {
+		return Report{Tool: "OpenCode", Slug: "opencode"}
+	}
 	base := Report{
 		Tool: "OpenCode",
 		Slug: "opencode",
@@ -380,7 +523,7 @@ func openCodeReport(home string) Report {
 		"`opencode db path` prints the local DB location."
 	if home != "" {
 		dbDir := filepath.Join(home, ".local", "share", "opencode")
-		if info, err := os.Stat(dbDir); err == nil && info.IsDir() {
+		if info, err := os.Stat(dbDir); err == nil && info.IsDir() && p.budget.Match(dbDir) {
 			base.ArtifactPath = dbDir
 			base.Mechanism = MechanismMetadataOnly
 			base.Summary = "OpenCode local data directory found; use `opencode export <sessionID>` to get the actual system prompt (not parsed by this CLI)."
@@ -393,6 +536,14 @@ func openCodeReport(home string) Report {
 // ---- Aider --------------------------------------------------------
 
 func aiderReport(absTarget string) Report {
+	return (&inspector{budget: budget.New(budget.Limits{})}).aiderReport(absTarget)
+}
+
+func (p *inspector) aiderReport(absTarget string) (result Report) {
+	defer p.finish(&result)
+	if p.budget.Err() != nil {
+		return Report{Tool: "Aider", Slug: "aider"}
+	}
 	base := Report{
 		Tool: "Aider",
 		Slug: "aider",
@@ -401,10 +552,47 @@ func aiderReport(absTarget string) Report {
 	llmHistory := filepath.Join(absTarget, ".aider.llm.history")
 	chatHistory := filepath.Join(absTarget, ".aider.chat.history.md")
 
-	if info, err := os.Stat(llmHistory); err == nil && info.Mode().IsRegular() {
-		content, readErr := os.ReadFile(llmHistory)
-		if readErr != nil {
+	// Root follows relative in-project links, but refuses escapes and absolute
+	// links: https://pkg.go.dev/os#Root. Do not use Stat + ReadFile on the
+	// unconfined path. Root does not block devices/mounts or make a snapshot.
+	root, rootErr := os.OpenRoot(absTarget)
+	if rootErr != nil {
+		goto noHistory
+	}
+	defer root.Close()
+	if info, err := root.Stat(".aider.llm.history"); err == nil && info.Mode().IsRegular() {
+		if !p.budget.Match(llmHistory) {
+			return base
+		}
+		f, openErr := fileio.OpenRegularAt(root, ".aider.llm.history")
+		if openErr != nil {
 			goto chatHistoryFallback
+		}
+		defer f.Close()
+		// The safe opener validates the descriptor and avoids FIFO writer
+		// waits on Unix. Stat this same descriptor for the reported mtime.
+		info, err = f.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			goto chatHistoryFallback
+		}
+		content, readErr := p.budget.Read(f, llmHistory)
+		if readErr != nil {
+			base = incompleteReport(base, readErr)
+			base.ArtifactPath = llmHistory
+			base.LastModified = info.ModTime()
+			if p.budget.Err() != nil {
+				base.Detail += " The default per-file policy is a 16 MiB actx safety budget, not an Aider limit; the active limit is stated above."
+			}
+			return base
+		}
+		if len(content) == 0 {
+			base.Mechanism = MechanismMetadataOnly
+			base.ArtifactPath = llmHistory
+			base.LastModified = info.ModTime()
+			base.Summary = "Found .aider.llm.history, but it is empty; no instruction content recovered."
+			base.Detail = "An empty file confirms only the artifact's existence, not a system prompt or any messages sent to a model."
+			base.Confidence = "metadata-only: empty history; content not confirmed"
+			return base
 		}
 		base.Mechanism = MechanismContentConfirmed
 		base.ArtifactPath = llmHistory
@@ -419,7 +607,7 @@ func aiderReport(absTarget string) Report {
 	}
 
 chatHistoryFallback:
-	if info, err := os.Stat(chatHistory); err == nil && info.Mode().IsRegular() {
+	if info, err := root.Stat(".aider.chat.history.md"); err == nil && info.Mode().IsRegular() && p.budget.Match(chatHistory) {
 		base.Mechanism = MechanismMetadataOnly
 		base.ArtifactPath = chatHistory
 		base.LastModified = info.ModTime()
@@ -431,11 +619,12 @@ chatHistoryFallback:
 		return base
 	}
 
+noHistory:
 	base.Mechanism = MechanismDocumentedFlagNotRun
-	base.Summary = "No Aider history files found in this directory."
+	base.Summary = "No readable in-project Aider history files found in this directory."
 	base.Detail = "Checked for .aider.llm.history (raw LLM messages incl. system prompt; opt-in via --llm-history-file) and .aider.chat.history.md " +
-		"(human-readable, on by default, no system prompt) at " + absTarget + ". Neither exists here — Aider may not have been run in this directory, " +
-		"or --chat-history-file/--llm-history-file may point elsewhere."
+		"(human-readable, on by default, no system prompt) at " + absTarget + ". Files may be absent, unreadable, non-regular, or linked outside the project. " +
+		"Only project-confined relative symlinks are followed; absolute links are refused. Aider may not have been run here, or its history flags may point elsewhere."
 	base.Confidence = "confirmed: source-verified flag/filename behavior"
 	return base
 }
@@ -447,6 +636,14 @@ chatHistoryFallback:
 // project_hash from a target path and scope the count to it. This reports
 // counts aggregated across all project hashes on the machine instead.
 func geminiCLIReport(home, absTarget string) Report {
+	return (&inspector{budget: budget.New(budget.Limits{})}).geminiCLIReport(home, absTarget)
+}
+
+func (p *inspector) geminiCLIReport(home, absTarget string) (result Report) {
+	defer p.finish(&result)
+	if p.budget.Err() != nil {
+		return Report{Tool: "Gemini CLI", Slug: "gemini-cli"}
+	}
 	base := Report{
 		Tool: "Gemini CLI",
 		Slug: "gemini-cli",
@@ -463,20 +660,26 @@ func geminiCLIReport(home, absTarget string) Report {
 
 	if home != "" {
 		tmpRoot := filepath.Join(home, ".gemini", "tmp")
-		if entries, err := os.ReadDir(tmpRoot); err == nil {
+		if entries, err := p.budget.ReadDir(tmpRoot); err == nil {
 			var newest time.Time
 			count := 0
 			for _, e := range entries {
+				if p.budget.Err() != nil {
+					return base
+				}
 				if !e.IsDir() {
 					continue
 				}
 				chatsDir := filepath.Join(tmpRoot, e.Name(), "chats")
-				chatEntries, err := os.ReadDir(chatsDir)
+				chatEntries, err := p.budget.ReadDir(chatsDir)
 				if err != nil {
 					continue
 				}
 				for _, ce := range chatEntries {
-					if info, err := ce.Info(); err == nil && info.Mode().IsRegular() {
+					if p.budget.Err() != nil {
+						return base
+					}
+					if info, err := ce.Info(); err == nil && info.Mode().IsRegular() && p.budget.Match(filepath.Join(chatsDir, ce.Name())) {
 						count++
 						if info.ModTime().After(newest) {
 							newest = info.ModTime()
@@ -517,6 +720,14 @@ func githubCopilotReport() Report {
 }
 
 func cursorReport(home string) Report {
+	return (&inspector{budget: budget.New(budget.Limits{})}).cursorReport(home)
+}
+
+func (p *inspector) cursorReport(home string) (result Report) {
+	defer p.finish(&result)
+	if p.budget.Err() != nil {
+		return Report{Tool: "Cursor", Slug: "cursor"}
+	}
 	base := Report{
 		Tool:      "Cursor",
 		Slug:      "cursor",
@@ -538,7 +749,7 @@ func cursorReport(home string) Report {
 			filepath.Join(home, ".config", "Cursor", "User", "globalStorage", "state.vscdb"),
 		}
 		for _, c := range candidates {
-			if info, err := os.Stat(c); err == nil && info.Mode().IsRegular() {
+			if info, err := os.Stat(c); err == nil && info.Mode().IsRegular() && p.budget.Match(c) {
 				base.ArtifactPath = c
 				base.LastModified = info.ModTime()
 				base.Mechanism = MechanismMetadataOnly
@@ -551,6 +762,14 @@ func cursorReport(home string) Report {
 }
 
 func windsurfReport(home string) Report {
+	return (&inspector{budget: budget.New(budget.Limits{})}).windsurfReport(home)
+}
+
+func (p *inspector) windsurfReport(home string) (result Report) {
+	defer p.finish(&result)
+	if p.budget.Err() != nil {
+		return Report{Tool: "Windsurf", Slug: "windsurf"}
+	}
 	base := Report{
 		Tool:      "Windsurf",
 		Slug:      "windsurf",
@@ -565,12 +784,18 @@ func windsurfReport(home string) Report {
 	}
 	if home != "" {
 		dir := filepath.Join(home, ".windsurf", "transcripts")
-		if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
+		if entries, err := p.budget.ReadDir(dir); err == nil && len(entries) > 0 {
 			var newest time.Time
 			count := 0
 			for _, e := range entries {
+				if p.budget.Err() != nil {
+					return base
+				}
 				if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
 					continue
+				}
+				if !p.budget.Match(filepath.Join(dir, e.Name())) {
+					return base
 				}
 				count++
 				if info, err := e.Info(); err == nil && info.ModTime().After(newest) {
@@ -590,6 +815,14 @@ func windsurfReport(home string) Report {
 }
 
 func clineReport(home string) Report {
+	return (&inspector{budget: budget.New(budget.Limits{})}).clineReport(home)
+}
+
+func (p *inspector) clineReport(home string) (result Report) {
+	defer p.finish(&result)
+	if p.budget.Err() != nil {
+		return Report{Tool: "Cline", Slug: "cline"}
+	}
 	base := Report{
 		Tool:      "Cline",
 		Slug:      "cline",
@@ -609,14 +842,17 @@ func clineReport(home string) Report {
 			filepath.Join(home, ".config", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "tasks"),
 		}
 		for _, dir := range candidates {
-			entries, err := os.ReadDir(dir)
+			entries, err := p.budget.ReadDir(dir)
 			if err != nil || len(entries) == 0 {
 				continue
 			}
 			var newest time.Time
 			count := 0
 			for _, e := range entries {
-				if info, err := e.Info(); err == nil && info.IsDir() {
+				if p.budget.Err() != nil {
+					return base
+				}
+				if info, err := e.Info(); err == nil && info.IsDir() && p.budget.Match(filepath.Join(dir, e.Name())) {
 					count++
 					if info.ModTime().After(newest) {
 						newest = info.ModTime()
@@ -638,6 +874,14 @@ func clineReport(home string) Report {
 }
 
 func hermesReport(home string) Report {
+	return (&inspector{budget: budget.New(budget.Limits{})}).hermesReport(home)
+}
+
+func (p *inspector) hermesReport(home string) (result Report) {
+	defer p.finish(&result)
+	if p.budget.Err() != nil {
+		return Report{Tool: "Hermes Agent", Slug: "hermes"}
+	}
 	base := Report{
 		Tool:      "Hermes Agent",
 		Slug:      "hermes",
@@ -652,11 +896,14 @@ func hermesReport(home string) Report {
 	}
 	if home != "" {
 		dir := filepath.Join(home, ".hermes", "sessions")
-		if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
+		if entries, err := p.budget.ReadDir(dir); err == nil && len(entries) > 0 {
 			var newest time.Time
 			count := 0
 			for _, e := range entries {
-				if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
+				if p.budget.Err() != nil {
+					return base
+				}
+				if info, err := e.Info(); err == nil && info.Mode().IsRegular() && p.budget.Match(filepath.Join(dir, e.Name())) {
 					count++
 					if info.ModTime().After(newest) {
 						newest = info.ModTime()

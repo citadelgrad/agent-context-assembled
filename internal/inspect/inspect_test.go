@@ -358,7 +358,10 @@ func TestReadCodexRolloutScannerErrorRejectsPartialState(t *testing.T) {
 	}
 }
 
-func TestReadCodexRolloutEmptyBaseDoesNotReplaceLastNonEmptyBase(t *testing.T) {
+// Session metadata is the current fixed-persona snapshot (docs/research.md,
+// Runtime introspection), not a last-nonempty merge. An empty replacement is
+// not evidence of the earlier persona. This replaces the old preservation oracle.
+func TestReadCodexRolloutEmptyBaseClearsPreviousBase(t *testing.T) {
 	content := strings.Join([]string{
 		rolloutRecord("session_meta", map[string]any{
 			"cwd": "/project", "base_instructions": map[string]any{"text": "keep this"},
@@ -368,8 +371,8 @@ func TestReadCodexRolloutEmptyBaseDoesNotReplaceLastNonEmptyBase(t *testing.T) {
 		}),
 	}, "\n")
 	_, base, _, ok := readCodexRolloutReader(strings.NewReader(content))
-	if !ok || base != "keep this" {
-		t.Fatalf("base=%q ok=%v, want last non-empty base preserved", base, ok)
+	if !ok || base != "" {
+		t.Fatalf("base=%q ok=%v, want empty current base", base, ok)
 	}
 }
 
@@ -458,13 +461,18 @@ func TestAiderReportRequiresReadableRegularArtifacts(t *testing.T) {
 	}{
 		{name: "absent", setup: func(t *testing.T, path string) {}, mechanism: MechanismDocumentedFlagNotRun},
 		{name: "regular", setup: func(t *testing.T, path string) { mustWriteFile(t, path, "content") }, mechanism: MechanismContentConfirmed, content: "content"},
-		{name: "empty regular", setup: func(t *testing.T, path string) { mustWriteFile(t, path, "") }, mechanism: MechanismContentConfirmed},
+		// An empty artifact proves only existence, not instruction content
+		// (MechanismContentConfirmed's contract and docs/research.md).
+		{name: "empty regular", setup: func(t *testing.T, path string) { mustWriteFile(t, path, "") }, mechanism: MechanismMetadataOnly},
 		{name: "directory", setup: func(t *testing.T, path string) { mustMkdirAll(t, path) }, mechanism: MechanismDocumentedFlagNotRun},
-		{name: "symlink to file", setup: func(t *testing.T, path string) {
-			target := filepath.Join(t.TempDir(), "target")
+		// Preserve ordinary relative links to regular files within the project.
+		// The old outside-project absolute-link fixture bypassed project scope;
+		// escaping links now have their own rejection regression test.
+		{name: "symlink to in-project file", setup: func(t *testing.T, path string) {
+			target := filepath.Join(filepath.Dir(path), "target")
 			mustWriteFile(t, target, "linked")
 			mustMkdirAll(t, filepath.Dir(path))
-			if err := os.Symlink(target, path); err != nil {
+			if err := os.Symlink("target", path); err != nil {
 				t.Fatal(err)
 			}
 		}, mechanism: MechanismContentConfirmed, content: "linked"},
